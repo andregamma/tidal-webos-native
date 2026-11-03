@@ -141,6 +141,17 @@ fn save_png(path: &Path, rgba: &[u8], w: u32, h: u32) -> Result<(), Box<dyn std:
     Ok(())
 }
 
+/// True when `dir` exists (or can be created) and a file can be written in it.
+fn writable_dir(dir: &Path) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(".write-test");
+    let ok = std::fs::write(&probe, b"ok").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = parse_args();
 
@@ -148,13 +159,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // XDG-style default so existing config files keep working.
     let on_tv = cfg!(target_arch = "arm");
     if on_tv && std::env::var_os("TIDE_DATA_DIR").is_none() {
-        let persistent = std::path::Path::new("/media/developer/tide-tv");
-        let dir = if std::fs::create_dir_all(persistent).is_ok() {
-            persistent.to_path_buf()
-        } else {
-            std::path::Path::new(&std::env::var_os("HOME").unwrap_or_default()).join("tide-data")
-        };
-        std::env::set_var("TIDE_DATA_DIR", dir);
+        // Prefer /media/developer (survives reinstalling the app); take the first directory we can
+        // really write a file in, not just create.
+        let mut candidates = vec![std::path::PathBuf::from("/media/developer/tide-tv")];
+        if let Some(d) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("tide-data"))) {
+            candidates.push(d);
+        }
+        candidates.push(std::path::Path::new(&std::env::var_os("HOME").unwrap_or_default()).join("tide-data"));
+        if let Some(dir) = candidates.iter().find(|d| writable_dir(d)) {
+            std::env::set_var("TIDE_DATA_DIR", dir);
+        }
     }
     let log_dir = tide_api::paths::data_dir();
     log::init(&log_dir);

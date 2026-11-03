@@ -45,9 +45,8 @@ FEATURES=tidlers ci/webos-build.sh    # -> dist/tide-tv_tidlers.ipk
   Press every remote key and tell me which scancode shows up for OK, arrows and Back.
   Known from SDL-webOS: Back = 482, Home = 384, Exit = 505, Red = 486; Play/Stop/Prev/Next arrive as the
   standard audio keys; Rew/FF = 285/286.
-* **Log**: `<app dir>/tide-data/tide.log` (the previous run is `tide.log.old`). Fetch with
-  `ares-pull --device tv /media/developer/apps/usr/palm/applications/dev.tidetv.app/tide-data/tide.log .`
-  (path assumed for Developer Mode installs; adjust if different). It records the SDL video/audio driver chosen,
+* **Log**: `/media/developer/tide-tv/tide.log` (the previous run is `tide.log.old`; falls back to `<app dir>/tide-data`, see `docs/auth.md`). Fetch with
+  `ares-pull --device tv /media/developer/tide-tv/tide.log .`. It records the SDL video/audio driver chosen,
   panics and errors.
 * **Credentials**: nothing to configure; sign-in uses the `tidlers` library's defaults (`docs/auth.md`).
 * Backend defaults to `tidlers` on the `tidlers` build (override with `TIDE_BACKEND=mock|tidlers`), `mock` otherwise (the basic build has no real backend).
