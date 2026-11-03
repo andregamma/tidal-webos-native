@@ -5,7 +5,7 @@ edition.workspace = true
 
 [features]
 # Proof of concept: backend built on the `tidlers` crate (see docs/tidlers-poc.md).
-tidlers = ["dep:tidlers", "dep:tokio"]
+tidlers = ["dep:tidlers", "dep:tokio", "dep:http"]
 
 [dependencies]
 tide-core = { path = "../tide-core" }
@@ -13,3 +13,5 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tidlers = { version = "=0.5.0", optional = true }
 tokio = { version = "1", features = ["rt", "time", "net"], optional = true }
+# Same crate `tidlers`/`reqwest` already use; only for `Method`/`HeaderMap` in the raw Home request.
+http = { version = "1", optional = true }

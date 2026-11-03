@@ -1657,6 +1657,7 @@ dependencies = [
 name = "tide-api"
 version = "0.1.0"
 dependencies = [
+ "http",
  "serde",
  "serde_json",
  "tide-core",

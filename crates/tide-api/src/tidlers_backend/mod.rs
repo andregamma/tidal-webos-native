@@ -10,6 +10,7 @@
 //! * The library is async; this thread owns a current-thread tokio runtime and
 //!   blocks on one command at a time.
 
+mod home;
 mod map;
 
 use crate::diag;
@@ -343,9 +344,22 @@ impl Backend {
             return;
         }
         let Some(client) = self.client.as_ref() else { return };
-        match self.rt.block_on(client.get_home_feed(HOME_ITEMS)) {
-            Ok(feed) => send(Evt::Home(map::map_home(&feed))),
-            Err(e) => send(Evt::Error(format!("Could not load Home: {e}"))),
+        match self.rt.block_on(home::fetch(client, HOME_ITEMS)) {
+            Ok(p) => {
+                for s in &p.skipped {
+                    diag::log(&format!("home: skipped {s}"));
+                }
+                diag::log(&format!("home: {} feed items -> {} shelves, {} skipped", p.seen, p.shelves.len(), p.skipped.len()));
+                if p.shelves.is_empty() {
+                    send(Evt::Error("The Home feed had no shelves this app understands (details in tide.log)".into()));
+                }
+                send(Evt::Home(p.shelves));
+            }
+            Err(e) => {
+                send(Evt::Error(format!("Could not load Home: {e}")));
+                // log the error too, because the UI may not show it if the user navigates away before the request completes.
+                diag::log(&format!("Could not load Home: {e}"));
+            }
         }
     }
 

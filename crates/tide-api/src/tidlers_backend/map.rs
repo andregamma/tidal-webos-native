@@ -1,17 +1,16 @@
 //! Pure mappings from `tidlers` models to `tide-core` models (no I/O).
 
-use tide_core::model::{Card, LyricLine, Shelf, Track};
-use tidlers::client::models::home::{HomeFeedWeb, HomeItem, HomeListItem};
+use tide_core::model::{LyricLine, Track};
 use tidlers::client::models::track::Track as TTrack;
 use tidlers::resources::uuid_to_url_with_size;
 
 /// Cover URL template: the UI fills `{px}` with the size it needs.
 /// 160/320/640 are assumed to be sizes the image CDN serves: verify against the service.
-fn art_template(uuid: &str) -> String {
+pub(super) fn art_template(uuid: &str) -> String {
     uuid_to_url_with_size(uuid, 320).replace("320x320", "{px}x{px}")
 }
 
-fn seed(s: &str) -> u64 {
+pub(super) fn seed(s: &str) -> u64 {
     s.bytes().fold(14695981039346656037u64, |h, b| (h ^ b as u64).wrapping_mul(1099511628211))
 }
 
@@ -103,79 +102,6 @@ fn parse_stamp(s: &str) -> Option<f32> {
 /// playlist, mix and artist cards have `play: None` until M2 adds a
 /// collection screen. NOT unit-tested (the feed models need very large
 /// fixtures): verify with a real response.
-pub fn map_home(feed: &HomeFeedWeb) -> Vec<Shelf> {
-    let mut shelves = Vec::new();
-    for item in &feed.items {
-        let (title, items) = match item {
-            HomeItem::HomeHorizontalList { inner } => (&inner.title, &inner.items),
-            HomeItem::HomeHorizontalListWithContext { inner } => (&inner.title, &inner.items),
-            _ => continue,
-        };
-        let cards: Vec<Card> = items.iter().filter_map(map_home_item).collect();
-        if !cards.is_empty() {
-            shelves.push(Shelf { title: title.clone(), cards });
-        }
-    }
-    shelves
-}
-
-fn map_home_item(item: &HomeListItem) -> Option<Card> {
-    Some(match item {
-        HomeListItem::Track(t) => {
-            let d = &t.data;
-            let artist = join_names(d.artists.iter().map(|a| a.name.as_str()));
-            Card {
-                title: d.title.clone(),
-                subtitle: artist.clone(),
-                art_seed: d.id,
-                art: Some(art_template(&d.album.cover)),
-                play: Some(Track {
-                    id: d.id,
-                    title: d.title.clone(),
-                    artist,
-                    album: d.album.title.clone(),
-                    duration: d.duration as f32,
-                    art: Some(art_template(&d.album.cover)),
-                }),
-            }
-        }
-        HomeListItem::Album(a) => Card {
-            title: a.data.title.clone(),
-            subtitle: join_names(a.data.artists.iter().map(|x| x.name.as_str())),
-            art_seed: a.data.id,
-            art: Some(art_template(&a.data.cover)),
-            play: None,
-        },
-        HomeListItem::Playlist(p) => Card {
-            title: p.data.title.clone(),
-            subtitle: format!("{} tracks", p.data.number_of_tracks),
-            art_seed: seed(&p.data.uuid),
-            art: p
-                .data
-                .square_image
-                .as_deref()
-                .or(p.data.image.as_deref())
-                .map(|u| art_template(u)),
-            play: None,
-        },
-        HomeListItem::Mix(m) => Card {
-            title: m.data.title_text_info.text.clone().unwrap_or_else(|| "Mix".into()),
-            subtitle: m.data.short_subtitle_text_info.text.clone().unwrap_or_default(),
-            art_seed: seed(&m.data.id),
-            art: m.data.mix_images.first().map(|i| i.url.clone()),
-            play: None,
-        },
-        HomeListItem::Artist(a) => Card {
-            title: a.data.name.clone(),
-            subtitle: "Artist".into(),
-            art_seed: a.data.id,
-            art: a.data.picture.as_deref().map(|u| art_template(u)),
-            play: None,
-        },
-        HomeListItem::DeepLink(_) | HomeListItem::Unknown(_) => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
