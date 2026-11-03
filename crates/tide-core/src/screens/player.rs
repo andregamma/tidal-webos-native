@@ -3,7 +3,7 @@ use crate::anim::Smooth;
 use crate::draw::DrawList;
 use crate::geom::{Color, Rect};
 use crate::input::Key;
-use crate::model::{LyricLine, Track};
+use crate::model::{LyricLine, NowPlaying, Track};
 use crate::services::{PlayerCmd, StreamInfo};
 use crate::text::fit_text;
 use crate::{ui, Cx, H, W};
@@ -28,6 +28,9 @@ pub struct PlayerScreen {
     lyric_scroll: Smooth,
     /// Measured format of the stream being played (None until the player reports it).
     info: Option<StreamInfo>,
+    /// The stream finished or failed: nothing is playing any more, so play must start it again
+    /// (a Resume would go nowhere).
+    dead: bool,
 }
 
 impl PlayerScreen {
@@ -40,6 +43,7 @@ impl PlayerScreen {
             synced: true,
             lyric_scroll: Smooth::new(0.0).with_rate(9.0),
             info: None,
+            dead: false,
         }
     }
 
@@ -49,7 +53,44 @@ impl PlayerScreen {
         self.playing = true;
         self.lyrics = None;
         self.info = None;
+        self.dead = false;
         self.lyric_scroll.snap(0.0);
+    }
+
+    /// Snapshot for widgets (the mini bar); `None` until something was opened.
+    pub fn now_playing(&self) -> Option<NowPlaying<'_>> {
+        Some(NowPlaying { track: self.track.as_ref()?, pos: self.pos, playing: self.playing, quality: self.info.as_ref() })
+    }
+
+    /// True when the stream ended or failed and play has to load it again.
+    pub fn is_dead(&self) -> bool {
+        self.dead
+    }
+
+    /// Flip play/pause; returns the command for the player thread.
+    pub fn toggle(&mut self) -> PlayerCmd {
+        self.playing = !self.playing;
+        if self.playing {
+            PlayerCmd::Resume
+        } else {
+            PlayerCmd::Pause
+        }
+    }
+
+    /// Prepare to play the current track again from the start (lyrics are kept).
+    /// Returns `(track id, duration)` for the `Cmd::Play` the caller must send.
+    pub fn restart(&mut self) -> Option<(u64, f32)> {
+        let t = self.track.as_ref()?;
+        let out = (t.id, t.duration);
+        self.pos = 0.0;
+        self.playing = true;
+        self.dead = false;
+        Some(out)
+    }
+
+    pub fn on_failed(&mut self) {
+        self.playing = false;
+        self.dead = true;
     }
 
     pub fn set_stream_info(&mut self, info: StreamInfo) {
@@ -67,6 +108,7 @@ impl PlayerScreen {
 
     pub fn on_ended(&mut self) {
         self.playing = false;
+        self.dead = true;
         self.pos = 0.0;
     }
 
@@ -92,10 +134,7 @@ impl PlayerScreen {
     pub fn on_key(&mut self, k: Key) -> Action {
         let dur = self.track.as_ref().map_or(0.0, |t| t.duration);
         match k {
-            Key::Ok | Key::PlayPause => {
-                self.playing = !self.playing;
-                return Action::Transport(if self.playing { PlayerCmd::Resume } else { PlayerCmd::Pause });
-            }
+            Key::Ok | Key::PlayPause => return Action::Transport(self.toggle()),
             Key::Left | Key::Right | Key::Prev => {
                 self.pos = match k {
                     Key::Left => (self.pos - 10.0).max(0.0),

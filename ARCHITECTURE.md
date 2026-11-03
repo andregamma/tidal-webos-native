@@ -34,13 +34,27 @@ Why: trivial to reason about, allocation-light, easy to test headlessly
 (`App::view` with `MonoMetrics` in `app.rs` tests).
 
 ## 3. Focus & motion (the part that makes it feel smooth)
-* Two focus zones: **Sidebar** and **Content**. Screens return an `Action`
-  (`FocusSidebar`, `Play(track)`, `Back`) instead of mutating the app.
+* Three focus zones: **Sidebar**, **Content** and the **mini bar**. Screens return an `Action`
+  (`FocusSidebar`, `FocusBar`, `Play(track)`, `Back`) instead of mutating the app.
 * Every moving value is a `Smooth` (exponential smoothing, frame-rate
   independent): scroll offsets, per-card focus (ring + 5% scale), sidebar
   expansion, highlight bar, lyric scroll, route fade.
 * Sidebar expands as an **overlay**, so content never re-layouts.
 * Lists cull off-screen rows/cards before emitting commands.
+
+### Mini bar (persistent "now playing")
+`widgets::minibar::MiniBar` is a component, not a page: it takes a borrowed `model::NowPlaying`, returns a
+`BarAction` and knows nothing about routes or the backend. `App` draws it above the page (below the sidebar
+overlay and the toast) on every route except Login and the full player, and acts on its actions
+(play/pause, open the full player). Playback survives navigation: Back from the player no longer sends
+`PlayerCmd::Stop`, and `PlayerScreen` keeps its clock running on every route.
+
+To use it from a new page: (1) call `set_bottom_inset(minibar::RESERVED)`-style handling like `HomeScreen`
+does, so content stays clear of the bar; (2) return `Action::FocusBar` when Down runs off the end of the page.
+The bar is reached **only** that way (or via the sidebar's "Reproduzindo agora" entry), so the arrow keys keep
+their normal meaning everywhere else. Up/Back leaves the bar; Left/Right pick play/pause or the chevron.
+A finished or failed stream is flagged (`PlayerScreen::is_dead`): play then reloads it with a new `Cmd::Play`,
+because a `Resume` would reach no stream. Selecting the track that is already playing only shows the player.
 
 ## 4. Rendering
 * Logical canvas is 1920×1080; `Renderer::set_drawable_size` scales it

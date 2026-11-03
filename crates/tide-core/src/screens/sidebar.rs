@@ -4,7 +4,7 @@ use crate::geom::{Color, Rect};
 use crate::{ui, Cx, H, W};
 
 pub const COLLAPSED_W: f32 = 120.0;
-pub const EXPANDED_W: f32 = 400.0;
+pub const EXPANDED_W: f32 = 520.0;
 const ITEMS_TOP: f32 = 300.0;
 const ITEM_H: f32 = 84.0;
 const ITEM_PITCH: f32 = 100.0;
@@ -14,9 +14,13 @@ pub struct Item {
     pub label: &'static str,
 }
 
-pub const ITEMS: [Item; 2] = [
+/// Index of the entry that opens the full player.
+pub const NOW_PLAYING: usize = 2;
+
+pub const ITEMS: [Item; 3] = [
     Item { glyph: "H", label: "Home" },
     Item { glyph: "♥", label: "Liked songs" },
+    Item { glyph: "♪", label: "Playing now" },
 ];
 
 /// Left rail. Collapsed = icons only; focused = expands as an overlay (content

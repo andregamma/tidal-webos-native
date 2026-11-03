@@ -18,6 +18,8 @@ pub struct LikedScreen {
     sel: usize,
     scroll: Smooth,
     hl_y: Smooth,
+    /// Bottom space kept free for the mini bar.
+    inset: f32,
 }
 
 impl LikedScreen {
@@ -28,13 +30,21 @@ impl LikedScreen {
         self.hl_y.snap(0.0);
     }
 
+    pub fn set_bottom_inset(&mut self, px: f32) {
+        if (px - self.inset).abs() > 0.5 {
+            self.inset = px;
+            self.retarget();
+        }
+    }
+
     pub fn on_key(&mut self, k: Key) -> Action {
         match k {
             Key::Up => self.sel = self.sel.saturating_sub(1),
             Key::Down => {
-                if !self.tracks.is_empty() {
-                    self.sel = (self.sel + 1).min(self.tracks.len() - 1)
+                if self.sel + 1 >= self.tracks.len() {
+                    return Action::FocusBar;
                 }
+                self.sel += 1;
             }
             Key::Left | Key::Back => return Action::FocusSidebar,
             Key::Ok => {
@@ -49,7 +59,7 @@ impl LikedScreen {
     }
 
     fn retarget(&mut self) {
-        let view_h = H - LIST_TOP - 24.0;
+        let view_h = H - LIST_TOP - 24.0 - self.inset;
         let top = self.sel as f32 * ROW_H;
         let cur = self.scroll.target;
         if top < cur {
@@ -71,7 +81,7 @@ impl LikedScreen {
         out.text(LEFT, 70.0, 56.0, t.text, "Liked songs");
         out.text(LEFT, 140.0, 28.0, t.text_dim, &format!("{} tracks", self.tracks.len()));
 
-        out.clip(Some(Rect::new(COLLAPSED_W, LIST_TOP - 10.0, W - COLLAPSED_W, H - LIST_TOP + 10.0)));
+        out.clip(Some(Rect::new(COLLAPSED_W, LIST_TOP - 10.0, W - COLLAPSED_W, H - LIST_TOP + 10.0 - self.inset)));
         let sy = self.scroll.value;
         let list_w = W - LEFT - 96.0;
 
@@ -106,5 +116,36 @@ impl LikedScreen {
             ui::text_right(out, cx.m, LEFT + list_w - 24.0, y + 30.0, 26.0, t.text_dim, &ui::fmt_time(tr.duration));
         }
         out.clip(None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tracks(n: u64) -> Vec<Track> {
+        (0..n).map(|i| Track { id: i, title: "t".into(), artist: "a".into(), album: "b".into(), duration: 60.0, art: None }).collect()
+    }
+
+    #[test]
+    fn down_past_the_last_track_hands_focus_to_the_bar() {
+        let mut l = LikedScreen::default();
+        l.set_tracks(tracks(2));
+        assert!(matches!(l.on_key(Key::Down), Action::None));
+        assert!(matches!(l.on_key(Key::Down), Action::FocusBar));
+        assert_eq!(l.sel, 1);
+        assert!(matches!(l.on_key(Key::Ok), Action::Play(_)));
+    }
+
+    #[test]
+    fn bottom_inset_keeps_the_selected_row_above_the_bar() {
+        let mut l = LikedScreen::default();
+        l.set_tracks(tracks(30));
+        for _ in 0..29 {
+            l.on_key(Key::Down);
+        }
+        let without = l.scroll.target;
+        l.set_bottom_inset(164.0);
+        assert!((l.scroll.target - without - 164.0).abs() < 0.01);
     }
 }

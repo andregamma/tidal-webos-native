@@ -35,3 +35,16 @@ pub struct Shelf {
     pub title: String,
     pub cards: Vec<Card>,
 }
+
+/// Read-only view of what is playing right now, borrowed from the player state.
+/// Widgets that show playback (the mini bar, future overlays) take this instead of
+/// reaching into a screen, so they stay independent of every page.
+#[derive(Clone, Copy, Debug)]
+pub struct NowPlaying<'a> {
+    pub track: &'a Track,
+    /// Seconds into the track.
+    pub pos: f32,
+    pub playing: bool,
+    /// What the decoder actually got (None until the player reports it).
+    pub quality: Option<&'a crate::services::StreamInfo>,
+}

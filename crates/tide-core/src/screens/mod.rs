@@ -12,6 +12,8 @@ use crate::services::PlayerCmd;
 pub enum Action {
     None,
     FocusSidebar,
+    /// Down ran off the end of the page: focus the mini bar (ignored when it is not shown).
+    FocusBar,
     Back,
     RetryLogin,
     /// Show a short message.

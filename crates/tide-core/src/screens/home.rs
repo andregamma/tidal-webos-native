@@ -29,6 +29,8 @@ pub struct HomeScreen {
     shelves: Vec<ShelfState>,
     row: usize,
     scroll_y: Smooth,
+    /// Bottom space kept free for the mini bar.
+    inset: f32,
 }
 
 impl HomeScreen {
@@ -48,6 +50,14 @@ impl HomeScreen {
         self.retarget(true);
     }
 
+    /// Keep `px` free at the bottom (the mini bar); re-targets the scroll so the focused row stays visible.
+    pub fn set_bottom_inset(&mut self, px: f32) {
+        if (px - self.inset).abs() > 0.5 {
+            self.inset = px;
+            self.retarget(false);
+        }
+    }
+
     pub fn on_key(&mut self, k: Key) -> Action {
         if self.shelves.is_empty() {
             return if k == Key::Left || k == Key::Back { Action::FocusSidebar } else { Action::None };
@@ -55,7 +65,12 @@ impl HomeScreen {
         let row = self.row;
         match k {
             Key::Up => self.row = row.saturating_sub(1),
-            Key::Down => self.row = (row + 1).min(self.shelves.len() - 1),
+            Key::Down => {
+                if row + 1 >= self.shelves.len() {
+                    return Action::FocusBar;
+                }
+                self.row = row + 1;
+            }
             Key::Left => {
                 let s = &mut self.shelves[row];
                 if s.col == 0 {
@@ -83,7 +98,7 @@ impl HomeScreen {
 
     fn retarget(&mut self, snap: bool) {
         let n = self.shelves.len() as f32;
-        let view_h = H - TOP;
+        let view_h = H - TOP - self.inset;
         let max_y = (n * PITCH - view_h).max(0.0);
         self.scroll_y.set((self.row as f32 * PITCH).min(max_y));
         let view_w = W - LEFT;
@@ -117,7 +132,7 @@ impl HomeScreen {
 
     pub fn view(&self, out: &mut DrawList, cx: &Cx, content_focused: bool) {
         let t = &cx.theme;
-        out.clip(Some(Rect::new(COLLAPSED_W, 0.0, W - COLLAPSED_W, H)));
+        out.clip(Some(Rect::new(COLLAPSED_W, 0.0, W - COLLAPSED_W, H - self.inset)));
         let sy = self.scroll_y.value;
         out.text(LEFT, TOP - 120.0 - sy, 56.0, t.text, "Home");
 
@@ -190,8 +205,22 @@ mod tests {
         assert_eq!(h.shelves[0].col, 2);
         h.on_key(Key::Down);
         assert_eq!(h.row, 1);
-        h.on_key(Key::Down); // clamped
+        // Past the last row Down hands focus to the mini bar instead of moving.
+        assert!(matches!(h.on_key(Key::Down), Action::FocusBar));
         assert_eq!(h.row, 1);
         assert!(matches!(h.on_key(Key::Ok), Action::Play(_)));
+    }
+
+    #[test]
+    fn bottom_inset_scrolls_the_last_row_clear_of_the_bar() {
+        let mut h = HomeScreen::default();
+        h.set_shelves(vec![shelf(3), shelf(3), shelf(3)]);
+        h.on_key(Key::Down);
+        h.on_key(Key::Down);
+        let without = h.scroll_y.target;
+        h.set_bottom_inset(164.0);
+        assert!((h.scroll_y.target - without - 164.0).abs() < 0.01);
+        h.set_bottom_inset(0.0);
+        assert!((h.scroll_y.target - without).abs() < 0.01, "back to normal when the bar goes away");
     }
 }

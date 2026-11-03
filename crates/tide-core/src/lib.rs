@@ -16,6 +16,7 @@ pub mod screens;
 pub mod services;
 pub mod text;
 pub mod theme;
+pub mod widgets;
 pub mod ui;
 
 /// Logical (design) resolution. Layout is authored in these units; the
