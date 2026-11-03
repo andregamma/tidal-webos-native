@@ -4,7 +4,7 @@
 //! frame. A backend thread (mock today, real Tidal client in M1/M2) does the
 //! slow work. Swapping the backend never touches the UI.
 
-use crate::model::{LyricLine, Shelf, Track};
+use crate::model::{Account, LyricLine, Shelf, Track};
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 /// Where the audio bytes come from. Produced by a backend, consumed by the player.
@@ -71,6 +71,11 @@ pub enum Cmd {
     LoadHome,
     LoadLiked,
     LoadLyrics(u64),
+    /// Name, e-mail and plan of the signed-in account (Settings page).
+    LoadAccount,
+    /// Change the language at runtime and persist it. Carries a code from `i18n::LANGUAGES`
+    /// (`pt-BR`); the backend applies it to the service client and saves it.
+    SetLocale(String),
 }
 
 #[derive(Debug)]
@@ -85,6 +90,7 @@ pub enum Evt {
     LoginFailed(String),
     Home(Vec<Shelf>),
     Liked(Vec<Track>),
+    Account(Account),
     /// `synced = false` means plain text without usable timestamps.
     Lyrics { track_id: u64, lines: Vec<LyricLine>, synced: bool },
     /// Format details of the stream that just started playing.

@@ -1,5 +1,6 @@
 use std::{thread::sleep, time::Duration};
-use tide_core::model::{Card, LyricLine, Shelf, Track};
+use crate::settings;
+use tide_core::model::{Account, Card, LyricLine, Plan, Shelf, Track};
 use tide_core::services::{BackendSide, Cmd, Evt, PlayerCmd, StreamSource, StreamSpec};
 
 /// Blocking loop: handles one command at a time, sleeping to mimic latency.
@@ -37,12 +38,34 @@ pub fn run(be: BackendSide) {
                 sleep(Duration::from_millis(200));
                 send(Evt::Liked(catalog()));
             }
+            Cmd::LoadAccount => {
+                sleep(Duration::from_millis(200));
+                send(Evt::Account(account()));
+            }
+            Cmd::SetLocale(code) => {
+                // Same persistence as the real backend, so the simulator remembers the language too.
+                settings::save_locale(&code);
+            }
             Cmd::LoadLyrics(id) => {
                 sleep(Duration::from_millis(250));
                 let dur = catalog().into_iter().find(|t| t.id == id).map_or(180.0, |t| t.duration);
                 send(Evt::Lyrics { track_id: id, lines: lyrics(dur), synced: true });
             }
         }
+    }
+}
+
+/// Fictional account for the Settings page.
+pub(crate) fn account() -> Account {
+    Account {
+        name: "Maria Silva".into(),
+        email: "maria.silva@example.com".into(),
+        plan: Some(Plan {
+            name: "HiFi Plus".into(),
+            status: "ACTIVE".into(),
+            valid_until: Some("2027-01-15".into()),
+            max_quality: Some("HI_RES_LOSSLESS".into()),
+        }),
     }
 }
 

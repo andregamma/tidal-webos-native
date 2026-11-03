@@ -48,3 +48,25 @@ pub struct NowPlaying<'a> {
     /// What the decoder actually got (None until the player reports it).
     pub quality: Option<&'a crate::services::StreamInfo>,
 }
+
+/// The signed-in account, as shown on the Settings page.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Account {
+    /// Full name, else nickname, else username (whatever the service has).
+    pub name: String,
+    pub email: String,
+    /// `None` when the subscription could not be fetched.
+    pub plan: Option<Plan>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plan {
+    /// Display name, e.g. `HiFi`.
+    pub name: String,
+    /// The service's own status word, e.g. `ACTIVE`.
+    pub status: String,
+    /// `YYYY-MM-DD` the subscription is paid up to.
+    pub valid_until: Option<String>,
+    /// Best quality the plan allows, as the service labels it (e.g. `HI_RES_LOSSLESS`).
+    pub max_quality: Option<String>,
+}

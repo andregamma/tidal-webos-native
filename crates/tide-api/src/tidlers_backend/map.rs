@@ -1,13 +1,73 @@
 //! Pure mappings from `tidlers` models to `tide-core` models (no I/O).
 
-use tide_core::model::{LyricLine, Track};
+use tide_core::i18n;
+use tide_core::model::{LyricLine, Plan, Track};
+use tidlers::client::models::subscription::UserSubscriptionResponse;
 use tidlers::client::models::track::Track as TTrack;
+use tidlers::client::models::user::User;
 use tidlers::resources::uuid_to_url_with_size;
 
 /// Cover URL template: the UI fills `{px}` with the size it needs.
 /// 160/320/640 are assumed to be sizes the image CDN serves: verify against the service.
 pub(super) fn art_template(uuid: &str) -> String {
     uuid_to_url_with_size(uuid, 320).replace("320x320", "{px}x{px}")
+}
+
+/// App language (`pt-BR`) -> the spelling the Tidal client sends as `locale` (`pt_BR`; the library's
+/// own default is `en_US`).
+pub(super) fn tidal_locale(code: &str) -> String {
+    i18n::resolve(code).replace('-', "_")
+}
+
+/// Best name the account has: full name, first + last, nickname, finally the username.
+pub(super) fn display_name(u: &User) -> String {
+    let clean = |s: &Option<String>| s.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    if let Some(n) = clean(&u.full_name) {
+        return n;
+    }
+    let both = [clean(&u.first_name), clean(&u.last_name)].into_iter().flatten().collect::<Vec<_>>().join(" ");
+    if !both.is_empty() {
+        return both;
+    }
+    clean(&u.nickname).unwrap_or_else(|| u.username.clone())
+}
+
+/// `HIFI_PLUS` -> `HiFi Plus`. Known plan types get their marketing name, anything else is
+/// title-cased so a new type still reads sensibly.
+pub(super) fn plan_label(raw: &str) -> String {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "FREE" => "Free".into(),
+        "PREMIUM" => "Premium".into(),
+        "PREMIUM_PLUS" => "Premium Plus".into(),
+        "HIFI" => "HiFi".into(),
+        "HIFIPLUS" | "HIFI_PLUS" => "HiFi Plus".into(),
+        "" => "—".into(),
+        other => other
+            .split('_')
+            .filter(|w| !w.is_empty())
+            .map(|w| {
+                let mut c = w.chars();
+                c.next().map_or_else(String::new, |f| f.to_string() + &c.as_str().to_ascii_lowercase())
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
+/// `2026-12-01T00:00:00.000+0000` -> `2026-12-01`.
+fn date_only(s: &str) -> Option<String> {
+    let d: String = s.chars().take(10).collect();
+    let b = d.as_bytes();
+    (b.len() == 10 && b[4] == b'-' && b[7] == b'-').then_some(d)
+}
+
+pub(super) fn map_plan(s: &UserSubscriptionResponse) -> Plan {
+    Plan {
+        name: plan_label(&s.subscription.subscription_type),
+        status: s.status.clone(),
+        valid_until: date_only(&s.valid_until),
+        max_quality: Some(s.highest_sound_quality.clone()).filter(|q| !q.is_empty()),
+    }
 }
 
 pub(super) fn seed(s: &str) -> u64 {

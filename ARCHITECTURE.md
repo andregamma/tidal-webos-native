@@ -69,8 +69,8 @@ because a `Resume` would reach no stream. Selecting the track that is already pl
   frame, 6 vertices per quad instead of indices/instancing.
 
 ## 5. Service seam
-Protocol (M1): `Cmd::{Boot, StartLogin, Logout, LoadHome, LoadLiked, LoadLyrics}`,
-`Evt::{LoginRequired, LoginCode, LoggedIn, LoginFailed, Home, Liked, Lyrics, Error}`.
+Protocol (M1): `Cmd::{Boot, StartLogin, Logout, LoadHome, LoadLiked, LoadLyrics, LoadAccount, SetLocale}`,
+`Evt::{LoginRequired, LoginCode, LoggedIn, LoginFailed, Home, Liked, Account, Lyrics, Error}`.
 `tide-api::tidlers_backend` adapts the `tidlers` crate (async, own tokio runtime) to this protocol.
 
 `services.rs` defines `Cmd` (UI → backend) and `Evt` (backend → UI). The UI
@@ -80,6 +80,13 @@ lyrics), and choose mock vs real in `tide-sdl` (e.g. `--backend=mock`).
 
 Alternative backend (POC, cargo feature `tidlers`): `tide-api::tidlers_backend` adapts the
 `tidlers` crate to the same protocol; see `docs/tidlers-poc.md` for findings and status.
+
+Settings & language: the Settings page (`screens/settings.rs`, with the reusable `widgets/select.rs`) shows the
+account (`Evt::Account`: name, e-mail, plan) and a language select fed by `tide_core::i18n::LANGUAGES` (codes like
+`pt-BR`). Picking one sends `Cmd::SetLocale`; the real backend stores it, sets `client.session.locale` on the live
+client and in `new_client` for every later one, and persists it through `tide_api::settings` (`tide-settings.json`,
+same multi-location storage as the session, kept across logout). `tide-sdl` loads it at start and gives it to
+`App::with_locale`; `App::locale()` is the key for the app's own i18n texts.
 
 Audio: `tide-player` (decode + PCM queue) with SDL output in `tide-sdl`; see `docs/audio.md`.
 

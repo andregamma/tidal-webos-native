@@ -1,11 +1,13 @@
 use crate::anim::Smooth;
 use crate::draw::DrawList;
 use crate::geom::{Color, Rect};
+use crate::i18n;
 use crate::images::Images;
 use crate::input::Key;
 use crate::screens::{
     home::HomeScreen, liked::LikedScreen, login::LoginScreen, player::PlayerScreen,
-    sidebar::{Sidebar, NOW_PLAYING}, Action,
+    settings::SettingsScreen,
+    sidebar::{Sidebar, NOW_PLAYING, SETTINGS}, Action,
 };
 use crate::services::{AppSide, Cmd, Evt};
 use crate::text::{fit_text, TextMetrics};
@@ -19,6 +21,7 @@ pub enum Route {
     Home,
     Liked,
     Player,
+    Settings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +38,7 @@ pub enum Start {
     Login,
     Home,
     Liked,
+    Settings,
 }
 
 pub struct App {
@@ -48,7 +52,11 @@ pub struct App {
     home: HomeScreen,
     liked: LikedScreen,
     player: PlayerScreen,
+    settings: SettingsScreen,
     minibar: MiniBar,
+    /// Current language (`pt-BR`): the key for the app's own texts once i18n lands, and what the
+    /// backend was told to ask the service for.
+    locale: String,
     svc: AppSide,
     time: f32,
     fade: Smooth,
@@ -70,7 +78,9 @@ impl App {
             home: HomeScreen::default(),
             liked: LikedScreen::default(),
             player: PlayerScreen::new(),
+            settings: SettingsScreen::default(),
             minibar: MiniBar::new(),
+            locale: i18n::DEFAULT_LOCALE.to_string(),
             svc,
             time: 0.0,
             fade: Smooth::new(0.0).with_rate(10.0),
@@ -85,8 +95,36 @@ impl App {
             }
             Start::Home => app.enter_main(Route::Home),
             Start::Liked => app.enter_main(Route::Liked),
+            Start::Settings => app.enter_main(Route::Settings),
         }
         app
+    }
+
+    /// Start with the saved language. Only sets what is shown: the backend reads the same saved
+    /// value on its own, so no command is sent.
+    pub fn with_locale(mut self, code: &str) -> Self {
+        self.locale = i18n::resolve(code).to_string();
+        self.settings.set_locale(&self.locale);
+        self
+    }
+
+    /// Current language code (`pt-BR`).
+    pub fn locale(&self) -> &str {
+        &self.locale
+    }
+
+    /// The user picked a language: tell the backend (applies + persists it) and refetch what the
+    /// service localises.
+    fn change_locale(&mut self, code: String) {
+        let code = i18n::resolve(&code).to_string();
+        if code == self.locale {
+            return;
+        }
+        self.locale = code.clone();
+        self.settings.set_locale(&code);
+        self.send(Cmd::SetLocale(code.clone()));
+        self.send(Cmd::LoadHome);
+        self.toast = Some((format!("Idioma: {}", i18n::language_name(&code)), 3.0));
     }
 
     pub fn route(&self) -> Route {
@@ -152,6 +190,7 @@ impl App {
     fn enter_main(&mut self, route: Route) {
         self.send(Cmd::LoadHome);
         self.send(Cmd::LoadLiked);
+        self.send(Cmd::LoadAccount);
         self.goto(route);
         self.focus = Focus::Content;
     }
@@ -163,6 +202,7 @@ impl App {
         match route {
             Route::Home => self.sidebar.select(0),
             Route::Liked => self.sidebar.select(1),
+            Route::Settings => self.sidebar.select(SETTINGS),
             _ => {}
         }
     }
@@ -171,6 +211,7 @@ impl App {
         while let Ok(evt) = self.svc.rx.try_recv() {
             match evt {
                 Evt::LoginRequired => {
+                    self.settings.clear_account();
                     self.login.set_checking();
                     self.send(Cmd::StartLogin);
                 }
@@ -186,6 +227,7 @@ impl App {
                 }
                 Evt::Home(shelves) => self.home.set_shelves(shelves),
                 Evt::Liked(tracks) => self.liked.set_tracks(tracks),
+                Evt::Account(account) => self.settings.set_account(account),
                 Evt::Lyrics { track_id, lines, synced } => self.player.set_lyrics(track_id, lines, synced),
                 Evt::StreamInfo(i) => self.player.set_stream_info(i),
                 Evt::Position(s) => self.player.set_position(s),
@@ -207,7 +249,7 @@ impl App {
             self.back_guard = self.time + 0.35;
         }
         // Play/pause works on every page that shows the bar (the player screen handles it itself).
-        if k == Key::PlayPause && matches!(self.route, Route::Home | Route::Liked) {
+        if k == Key::PlayPause && matches!(self.route, Route::Home | Route::Liked | Route::Settings) {
             self.toggle_playback();
             return;
         }
@@ -235,13 +277,17 @@ impl App {
                     _ => {}
                 }
             }
-            Route::Home | Route::Liked => match self.focus {
+            Route::Home | Route::Liked | Route::Settings => match self.focus {
                 Focus::Sidebar => match k {
                     Key::Up => self.sidebar.move_sel(-1),
                     Key::Down => self.sidebar.move_sel(1),
                     Key::Ok | Key::Right if self.sidebar.sel == NOW_PLAYING => self.open_player(),
                     Key::Ok | Key::Right => {
-                        let r = if self.sidebar.sel == 0 { Route::Home } else { Route::Liked };
+                        let r = match self.sidebar.sel {
+                            0 => Route::Home,
+                            1 => Route::Liked,
+                            _ => Route::Settings,
+                        };
                         if r != self.route {
                             self.goto(r);
                         }
@@ -251,14 +297,15 @@ impl App {
                     _ => {}
                 },
                 Focus::Content => {
-                    let action = if self.route == Route::Home {
-                        self.home.on_key(k)
-                    } else {
-                        self.liked.on_key(k)
+                    let action = match self.route {
+                        Route::Home => self.home.on_key(k),
+                        Route::Settings => self.settings.on_key(k),
+                        _ => self.liked.on_key(k),
                     };
                     match action {
                         Action::None | Action::Back | Action::RetryLogin | Action::Transport(_) => {}
                         Action::Toast(m) => self.toast = Some((m, 3.0)),
+                        Action::SetLocale(code) => self.change_locale(code),
                         Action::FocusSidebar => self.focus = Focus::Sidebar,
                         Action::FocusBar => {
                             if self.has_track() {
@@ -305,11 +352,13 @@ impl App {
         match self.route {
             Route::Home => self.home.update(dt),
             Route::Liked => self.liked.update(dt),
+            Route::Settings => self.settings.update(dt),
             Route::Player | Route::Login => {}
         }
         let inset = if self.has_track() { minibar::RESERVED } else { 0.0 };
         self.home.set_bottom_inset(inset);
         self.liked.set_bottom_inset(inset);
+        self.settings.set_bottom_inset(inset);
         self.minibar.update(dt, self.bar_available());
         if self.focus == Focus::Bar && !self.bar_available() {
             self.focus = Focus::Content;
@@ -337,6 +386,7 @@ impl App {
             Route::Home => self.home.view(out, &cx, content_focused),
             Route::Liked => self.liked.view(out, &cx, content_focused),
             Route::Player => self.player.view(out, &cx),
+            Route::Settings => self.settings.view(out, &cx, content_focused),
         }
         out.set_alpha(1.0);
 
@@ -345,8 +395,12 @@ impl App {
             self.minibar.view(out, &cx, &np, self.focus == Focus::Bar);
         }
 
-        if matches!(self.route, Route::Home | Route::Liked) {
-            let current = if self.route == Route::Home { 0 } else { 1 };
+        if matches!(self.route, Route::Home | Route::Liked | Route::Settings) {
+            let current = match self.route {
+                Route::Home => 0,
+                Route::Liked => 1,
+                _ => SETTINGS,
+            };
             self.sidebar.view(out, &cx, current);
         }
 

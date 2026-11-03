@@ -16,11 +16,14 @@ pub struct Item {
 
 /// Index of the entry that opens the full player.
 pub const NOW_PLAYING: usize = 2;
+/// Index of the entry that opens the Settings page.
+pub const SETTINGS: usize = 3;
 
-pub const ITEMS: [Item; 3] = [
+pub const ITEMS: [Item; 4] = [
     Item { glyph: "H", label: "Home" },
     Item { glyph: "♥", label: "Liked songs" },
     Item { glyph: "♪", label: "Playing now" },
+    Item { glyph: "⚙", label: "Settings" },
 ];
 
 /// Left rail. Collapsed = icons only; focused = expands as an overlay (content

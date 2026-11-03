@@ -2,6 +2,7 @@ pub mod home;
 pub mod liked;
 pub mod login;
 pub mod player;
+pub mod settings;
 pub mod sidebar;
 
 use crate::model::Track;
@@ -21,4 +22,6 @@ pub enum Action {
     Play(Track),
     /// Playback control to forward to the player.
     Transport(PlayerCmd),
+    /// The user picked a language (code from `i18n::LANGUAGES`, e.g. `pt-BR`).
+    SetLocale(String),
 }

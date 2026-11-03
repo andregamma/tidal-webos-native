@@ -78,6 +78,7 @@ fn parse_args() -> Opts {
                 o.start = match v {
                     "home" => Start::Home,
                     "liked" => Start::Liked,
+                    "settings" => Start::Settings,
                     _ => Start::Login,
                 }
             }
@@ -98,7 +99,7 @@ fn parse_args() -> Opts {
             "--duration" => o.duration = v.parse().unwrap_or(600.0),
             "--help" | "-h" => {
                 println!(
-                    "tide-tv [--screen=login|home|liked] [--size=WxH] [--backend=mock|tidlers] [--play-url=URL --mime=audio/flac] [--theme=path] [--hud] [--no-vsync]\n        \
+                    "tide-tv [--screen=login|home|liked|settings] [--size=WxH] [--backend=mock|tidlers] [--play-url=URL --mime=audio/flac] [--theme=path] [--hud] [--no-vsync]\n        \
                      [--screenshot=out.png [--frames=N] [--keys=down,right,ok,...]]"
                 );
                 std::process::exit(0);
@@ -174,6 +175,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::init(&log_dir);
     tide_api::diag::set_sink(log::line);
     logf!("tide-tv {} starting (tv build: {on_tv}, data dir: {})", env!("CARGO_PKG_VERSION"), log_dir.display());
+    // Saved app settings (language). The backend reads the same file on its own thread; the core does
+    // no I/O, so it is handed the value here.
+    let saved = tide_api::settings::Settings::load();
+    logf!("language: {}", saved.locale);
     let shot = opts.screenshot.is_some();
     let (win_w, win_h) = opts.size.unwrap_or(if shot { (1920, 1080) } else { (1280, 720) });
 
@@ -225,7 +230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             tier: None,
         }));
     }
-    let mut app = App::new(ch.app, theme, opts.start);
+    let mut app = App::new(ch.app, theme, opts.start).with_locale(&saved.locale);
     let mut list = DrawList::new();
     let loader = tide_img::Loader::new(2);
     let mut events = sdl.event_pump()?;

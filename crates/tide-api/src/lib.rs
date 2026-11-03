@@ -1,6 +1,7 @@
 //! Backends for `tide-core`'s `Cmd`/`Evt` protocol.
 //!
 //! * [`mock`] – fake data with artificial latency; playback is simulated.
+//! * [`settings`] – the app's own persistent settings (language); shared by every backend.
 //! * `tidlers_backend` – the real service, built on the `tidlers` crate (feature `tidlers`):
 //!   sign-in, favourites, lyrics, stream URLs. It uses the library's own client credentials.
 //!
@@ -9,6 +10,7 @@
 pub mod mock;
 pub mod diag;
 pub mod paths;
+pub mod settings;
 #[cfg(feature = "tidlers")]
 pub mod tidlers_backend;
 

@@ -9,6 +9,7 @@ pub mod anim;
 pub mod app;
 pub mod draw;
 pub mod geom;
+pub mod i18n;
 pub mod images;
 pub mod input;
 pub mod model;

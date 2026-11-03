@@ -15,6 +15,7 @@ mod map;
 
 use crate::diag;
 use crate::paths::session_files;
+use crate::settings;
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
@@ -25,6 +26,8 @@ use std::{
     thread,
     time::Duration,
 };
+use tide_core::i18n;
+use tide_core::model::Account;
 use tide_core::services::{BackendSide, Cmd, Evt, PlayerCmd, StreamSource, StreamSpec};
 use tidlers::{
     auth::TidalAuth,
@@ -71,12 +74,17 @@ pub struct Backend {
     /// The last boot could not reach the service: the next sign-in request retries the
     /// restore first instead of sending the user through the device-code flow.
     restore_pending: bool,
+    /// Current app language (`pt-BR`). Every client built from now on gets it (see `new_client`) and
+    /// `Cmd::SetLocale` applies it to the one already signed in.
+    locale: String,
     client: Option<TidalClient>,
     player: Option<Sender<PlayerCmd>>,
 }
 
 pub fn run(be: BackendSide) {
-    let mut b = Backend::new(session_files()).with_player(be.player.clone());
+    let mut b = Backend::new(session_files())
+        .with_player(be.player.clone())
+        .with_locale(&settings::Settings::load().locale);
     while let Ok(cmd) = be.rx.recv() {
         b.handle(cmd, &|e| {
             let _ = be.tx.send(e);
@@ -149,7 +157,15 @@ impl Backend {
     pub fn new(session_paths: Vec<PathBuf>) -> Self {
         let rt = Builder::new_current_thread().enable_all().build().expect("tokio runtime");
         let retry_delays = RESTORE_RETRY_DELAYS_SECS.iter().map(|s| Duration::from_secs(*s)).collect();
-        Self { rt, session_paths, retry_delays, restore_pending: false, client: None, player: None }
+        Self {
+            rt,
+            session_paths,
+            retry_delays,
+            restore_pending: false,
+            locale: i18n::DEFAULT_LOCALE.to_string(),
+            client: None,
+            player: None,
+        }
     }
 
     pub fn with_player(mut self, player: Sender<PlayerCmd>) -> Self {
@@ -157,10 +173,17 @@ impl Backend {
         self
     }
 
-    fn new_client() -> TidalClient {
+    pub fn with_locale(mut self, code: &str) -> Self {
+        self.locale = i18n::resolve(code).to_string();
+        self
+    }
+
+    fn new_client(&self) -> TidalClient {
         let auth = TidalAuth::with_oauth();
         let mut client = TidalClient::new(&auth);
         client.set_audio_quality(AudioQuality::High);
+        // `session.locale` is a plain `String` in tidlers 0.5.0 and uses `pt_BR`, not `pt-BR`.
+        client.session.locale = map::tidal_locale(&self.locale);
         client
     }
 
@@ -179,6 +202,8 @@ impl Backend {
             Cmd::LoadHome => self.load_home(send),
             Cmd::LoadLiked => self.load_liked(send),
             Cmd::LoadLyrics(id) => self.load_lyrics(id, send),
+            Cmd::LoadAccount => self.load_account(send),
+            Cmd::SetLocale(code) => self.set_locale(&code, send),
             Cmd::Play { track_id, duration } => self.play(track_id, duration, send),
         }
     }
@@ -227,7 +252,7 @@ impl Backend {
                 diag::log(&format!("restore: retrying in {}s (attempt {})", wait.as_secs(), attempt + 1));
                 thread::sleep(wait);
             }
-            let mut client = Self::new_client();
+            let mut client = self.new_client();
             client.session.auth.refresh_token = Some(token.clone());
             match self.rt.block_on(client.refresh_access_token(true)) {
                 Ok(_) => {
@@ -289,7 +314,7 @@ impl Backend {
             }
         }
         for _ in 0..MAX_CODE_REFRESHES {
-            let mut client = Self::new_client();
+            let mut client = self.new_client();
             let link = match self.rt.block_on(client.get_oauth_link()) {
                 Ok(l) => l,
                 Err(e) => return send(Evt::LoginFailed(e.to_string())),
@@ -326,6 +351,41 @@ impl Backend {
             send(Evt::Error(format!("Could not refresh the session: {e}")));
         }
         true
+    }
+
+    /// Runtime language change: remembered for every client created later, applied to the signed-in
+    /// client right away (its next request already carries the new `locale`) and persisted.
+    fn set_locale(&mut self, code: &str, send: &dyn Fn(Evt)) {
+        self.locale = i18n::resolve(code).to_string();
+        if let Some(client) = self.client.as_mut() {
+            client.session.locale = map::tidal_locale(&self.locale);
+        }
+        let copies = settings::save_locale(&self.locale);
+        diag::log(&format!("language set to {} ({copies} copies saved)", self.locale));
+        if copies == 0 {
+            send(Evt::Error("Could not save the language: it will reset when the app restarts.".into()));
+        }
+    }
+
+    /// Name and e-mail come from the user info the sign-in already filled in; the plan is one extra
+    /// request, and its failure only leaves the plan blank.
+    fn load_account(&mut self, send: &dyn Fn(Evt)) {
+        if !self.ensure_ready(send) {
+            return;
+        }
+        let Some(client) = self.client.as_ref() else { return };
+        let Some(user) = client.user_info.as_ref() else {
+            return send(Evt::Error("Could not load the account: no user information".into()));
+        };
+        let (name, email) = (map::display_name(user), user.email.clone());
+        let plan = match self.rt.block_on(client.subscription()) {
+            Ok(sub) => Some(map::map_plan(&sub)),
+            Err(e) => {
+                diag::log(&format!("account: could not load the subscription: {}", describe(&e)));
+                None
+            }
+        };
+        send(Evt::Account(Account { name, email, plan }));
     }
 
     fn load_liked(&mut self, send: &dyn Fn(Evt)) {

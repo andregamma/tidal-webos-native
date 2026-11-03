@@ -28,6 +28,9 @@ pub fn data_dir() -> PathBuf {
 /// File name of the saved sign-in (holds only the refresh token).
 pub const SESSION_FILE: &str = "tidlers-session.json";
 
+/// File name of the app settings (language, ...).
+pub const SETTINGS_FILE: &str = "tide-settings.json";
+
 /// Every place the saved sign-in is read from and written to, best first.
 ///
 /// On the TV one location can be volatile or read-only depending on firmware / how the app is
@@ -35,6 +38,16 @@ pub const SESSION_FILE: &str = "tidlers-session.json";
 /// parses and written to every location that accepts it. On the desktop there is only
 /// [`data_dir`].
 pub fn session_files() -> Vec<PathBuf> {
+    storage_files(SESSION_FILE)
+}
+
+/// Same redundancy as [`session_files`], for the app settings.
+pub fn settings_files() -> Vec<PathBuf> {
+    storage_files(SETTINGS_FILE)
+}
+
+/// Every place the file called `name` lives, best first (see [`session_files`] for why several).
+pub fn storage_files(name: &str) -> Vec<PathBuf> {
     let mut dirs = vec![data_dir()];
     if cfg!(target_arch = "arm") {
         dirs.push(PathBuf::from("/media/developer/tide-tv"));
@@ -47,7 +60,7 @@ pub fn session_files() -> Vec<PathBuf> {
     }
     let mut files: Vec<PathBuf> = Vec::new();
     for d in dirs {
-        let f = d.join(SESSION_FILE);
+        let f = d.join(name);
         if !files.contains(&f) {
             files.push(f);
         }
