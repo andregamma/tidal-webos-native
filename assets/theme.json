@@ -1,0 +1,10 @@
+{
+  "bg": "#0b0d12",
+  "sidebar_bg": "#12151c",
+  "surface": "#1a1f2a",
+  "surface_focus": "#2a3142",
+  "text": "#f2f4f8",
+  "text_dim": "#8b93a7",
+  "accent": "#2ee6d0",
+  "card_radius": 18
+}

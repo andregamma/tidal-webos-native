@@ -1,0 +1,9 @@
+[package]
+name = "tide-gfx"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tide-core = { path = "../tide-core" }
+glow = "0.13"
+fontdue = "0.8"

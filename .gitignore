@@ -1,0 +1,5 @@
+/target
+/shots
+*.ipk
+/build
+/dist

@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tide-core",
+    "crates/tide-gfx",
+    "crates/tide-img",
+    "crates/tide-player",
+    "crates/tide-api",
+    "crates/tide-sdl",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

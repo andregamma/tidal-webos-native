@@ -1,0 +1,54 @@
+name: webOS build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    name: webOS ipk (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # the tidlers build may fail on TLS/C deps while the basic one passes
+      matrix:
+        include:
+          - { name: basic,   features: "" }
+          - { name: tidlers, features: "tidlers" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build python3 libclang-dev
+
+      - name: Cache NDK
+        id: ndk
+        uses: actions/cache@v4
+        with:
+          path: ~/webos-ndk
+          key: webos-ndk-openlgtv-webos-b17b4cc
+
+      - name: NDK
+        if: steps.ndk.outputs.cache-hit != 'true'
+        run: ci/setup-ndk.sh
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-unknown-linux-gnueabi
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: cargo-${{ matrix.name }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build + package
+        env:
+          FEATURES: ${{ matrix.features }}
+        run: ci/webos-build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tide-tv-${{ matrix.name }}-ipk
+          path: dist/*.ipk

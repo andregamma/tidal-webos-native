@@ -1,0 +1,17 @@
+{
+  "id": "dev.tidetv.app",
+  "version": "0.2.0",
+  "vendor": "tide-tv",
+  "type": "native",
+  "main": "tide-tv",
+  "title": "TIDAL for webOS",
+  "appDescription": "Native TIDAL for webOS (unofficial)",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "splashBackground": "splash.png",
+  "iconColor": "#000000",
+  "nativeLifeCycleInterfaceVersion": 2,
+  "handlesRelaunch": false,
+  "transparent": false,
+  "requiredMemory": 256
+}
