@@ -11,6 +11,8 @@ pub enum Key {
     PlayPause,
     Next,
     Prev,
+    /// Open Settings on the audio-quality field (keyboard `Q`, webOS remote's green button).
+    Quality,
 }
 
 impl Key {
@@ -25,6 +27,7 @@ impl Key {
             "play" | "playpause" => Key::PlayPause,
             "next" => Key::Next,
             "prev" => Key::Prev,
+            "quality" | "q" => Key::Quality,
             _ => return None,
         })
     }

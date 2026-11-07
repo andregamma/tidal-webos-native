@@ -4,6 +4,7 @@ use crate::draw::DrawList;
 use crate::geom::{Color, Rect};
 use crate::input::Key;
 use crate::model::{LyricLine, NowPlaying, Track};
+use crate::quality::Quality;
 use crate::services::{PlayerCmd, StreamInfo};
 use crate::text::fit_text;
 use crate::{ui, Cx, H, W};
@@ -31,6 +32,10 @@ pub struct PlayerScreen {
     /// The stream finished or failed: nothing is playing any more, so play must start it again
     /// (a Resume would go nowhere).
     dead: bool,
+    /// Set while a seek is in flight: the time the user asked for. Position reports are ignored
+    /// until the player confirms where playback resumed (`on_seeked`); otherwise the bar jumps
+    /// back to the old spot while the new segment is being fetched, fighting the key presses.
+    seek_to: Option<f32>,
 }
 
 impl PlayerScreen {
@@ -44,6 +49,7 @@ impl PlayerScreen {
             lyric_scroll: Smooth::new(0.0).with_rate(9.0),
             info: None,
             dead: false,
+            seek_to: None,
         }
     }
 
@@ -54,6 +60,7 @@ impl PlayerScreen {
         self.lyrics = None;
         self.info = None;
         self.dead = false;
+        self.seek_to = None;
         self.lyric_scroll.snap(0.0);
     }
 
@@ -85,12 +92,14 @@ impl PlayerScreen {
         self.pos = 0.0;
         self.playing = true;
         self.dead = false;
+        self.seek_to = None;
         Some(out)
     }
 
     pub fn on_failed(&mut self) {
         self.playing = false;
         self.dead = true;
+        self.seek_to = None;
     }
 
     pub fn set_stream_info(&mut self, info: StreamInfo) {
@@ -99,6 +108,17 @@ impl PlayerScreen {
 
     /// Authoritative position from the player.
     pub fn set_position(&mut self, secs: f32) {
+        // While a seek is in flight the player is still on the old position (or still fetching the
+        // new one): its reports would drag the bar back, so the seek target wins until it lands.
+        if self.seek_to.is_some() {
+            return;
+        }
+        self.pos = secs;
+    }
+
+    /// The seek landed: playback resumes here (a segment boundary, not exactly what was asked).
+    pub fn on_seeked(&mut self, secs: f32) {
+        self.seek_to = None;
         self.pos = secs;
     }
 
@@ -110,6 +130,7 @@ impl PlayerScreen {
         self.playing = false;
         self.dead = true;
         self.pos = 0.0;
+        self.seek_to = None;
     }
 
     pub fn track_id(&self) -> Option<u64> {
@@ -141,6 +162,7 @@ impl PlayerScreen {
                     Key::Right => (self.pos + 10.0).min(dur),
                     _ => 0.0,
                 };
+                self.seek_to = Some(self.pos);
                 return Action::Transport(PlayerCmd::Seek(self.pos));
             }
             Key::Up | Key::Down if !self.synced => {
@@ -149,6 +171,8 @@ impl PlayerScreen {
                 self.lyric_scroll.set((self.lyric_scroll.target + d).clamp(0.0, (n - 6.0).max(0.0)));
             }
             Key::Back => return Action::Back,
+            // Straight to Settings, on the quality field.
+            Key::Quality => return Action::OpenQuality,
             _ => {}
         }
         Action::None
@@ -156,8 +180,9 @@ impl PlayerScreen {
 
     pub fn update(&mut self, dt: f32) {
         let dur = self.track.as_ref().map_or(0.0, |t| t.duration);
-        // Extrapolate between the player's position reports so the bar moves smoothly.
-        if self.playing && dur > 0.0 {
+        // Extrapolate between the player's position reports so the bar moves smoothly — but not
+        // while a seek is in flight: the bar must stay where the user put it.
+        if self.playing && dur > 0.0 && self.seek_to.is_none() {
             self.pos = (self.pos + dt).min(dur);
         }
         if self.synced {
@@ -185,28 +210,14 @@ impl PlayerScreen {
         let sub = fit_text(cx.m, &format!("{} · {}", track.artist, track.album), 28.0, 640.0);
         out.text(180.0, 842.0, 28.0, t.text_dim, &sub);
 
-        // Quality: the service's label (grey) and what the decoder actually got (accent),
-        // then what the audio device was opened with.
+        // One badge with what is actually playing (codec, bit depth, rate), coloured by the tier:
+        // grey/low, cyan/high, white/lossless, amber/max, as in the official client. The device's
+        // own format stays in the log (`audio: device opened at ...`).
         if let Some(i) = &self.info {
-            let mut x = 180.0;
-            if let Some(tier) = &i.tier {
-                x += ui::chip(out, cx.m, x, 84.0, &tier.replace('_', " "), 22.0, t.surface_focus, t.text_dim) + 12.0;
+            if let Some(specs) = Quality::specs(i) {
+                let (bg, fg) = Quality::of_stream(i).map_or((t.surface_focus, t.text_dim), |q| (q.chip_bg(), q.color()));
+                ui::chip(out, cx.m, 180.0, 84.0, &specs, 22.0, bg, fg);
             }
-            let src = match i.src_bits {
-                Some(b) => format!("{} · {}-bit / {}", i.codec, b, ui::fmt_khz(i.src_rate)),
-                None => format!("{} · {}", i.codec, ui::fmt_khz(i.src_rate)),
-            };
-            ui::chip(out, cx.m, x, 84.0, &src, 22.0, t.accent.with_alpha(0.18), t.accent);
-            let same = i.dev_rate == i.src_rate;
-            let line = format!(
-                "SDL output: {} · {} ch · {}{}",
-                ui::fmt_khz(i.dev_rate),
-                i.dev_channels,
-                i.driver,
-                if same { "" } else { "  (differs from source)" }
-            );
-            let col = if same { t.text_dim } else { t.accent };
-            out.text(180.0, 878.0, 20.0, col, &line);
         }
 
         // Progress bar.
@@ -227,7 +238,7 @@ impl PlayerScreen {
         } else {
             ui::text_centered(out, cx.m, c, 30.0, t.text, "▶");
         }
-        out.text(bx, by + 96.0, 22.0, t.text_dim, "◀ ▶  seek 10s");
+        out.text(bx, by + 96.0, 22.0, t.text_dim, "◀ ▶  seek 10s  ·  Q  audio quality");
 
         // Lyrics.
         out.clip(Some(Rect::new(LYRIC_X - 20.0, 60.0, LYRIC_W + 60.0, H - 120.0)));
@@ -281,6 +292,21 @@ mod tests {
     }
 
     #[test]
+    fn position_reports_do_not_drag_the_bar_back_while_a_seek_is_in_flight() {
+        let mut p = PlayerScreen::new();
+        p.open(track());
+        p.on_key(Key::Right); // ask for 10 s, the player is still at 0
+        p.set_position(0.2); // report from the old position: ignored
+        assert_eq!(p.pos, 10.0);
+        p.update(1.0 / 60.0); // no extrapolation while the seek is pending
+        assert_eq!(p.pos, 10.0);
+        p.on_seeked(8.0); // landed on the segment that starts at 8 s
+        assert_eq!(p.pos, 8.0);
+        p.set_position(8.4); // the clock is authoritative again
+        assert_eq!(p.pos, 8.4);
+    }
+
+    #[test]
     fn synced_lyrics_follow_playback_position() {
         let mut p = PlayerScreen::new();
         p.open(track());
@@ -311,6 +337,34 @@ mod tests {
         assert_eq!(p.lyric_scroll.target, 14.0); // clamped to n - 6
         p.on_key(Key::Up);
         assert_eq!(p.lyric_scroll.target, 13.0);
+    }
+
+    #[test]
+    fn the_quality_badge_shows_the_specs_and_no_device_line() {
+        let mut p = PlayerScreen::new();
+        p.open(track());
+        p.set_stream_info(StreamInfo {
+            codec: "FLAC".into(),
+            src_rate: 96_000,
+            src_bits: Some(24),
+            src_channels: 2,
+            dev_rate: 48_000,
+            dev_channels: 2,
+            driver: "pulseaudio".into(),
+            tier: Some("HI_RES".into()),
+        });
+        let (theme, m) = (Theme::default(), MonoMetrics);
+        let cx = Cx { theme: &theme, m: &m, images: &crate::images::NoImages, time: 0.0 };
+        let mut out = DrawList::new();
+        p.view(&mut out, &cx);
+        let texts: Vec<String> = out
+            .cmds
+            .iter()
+            .filter_map(|c| if let crate::draw::Cmd::Text { text, .. } = c { Some(text.clone()) } else { None })
+            .collect();
+        assert!(texts.iter().any(|s| s == "FLAC · 24-bit / 96 kHz"), "{texts:?}");
+        // The device's own format is logged, not drawn.
+        assert!(!texts.iter().any(|s| s.contains("SDL output")), "{texts:?}");
     }
 
     #[test]

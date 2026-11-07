@@ -13,13 +13,15 @@ The renderer keeps at most 96 textures (least recently used evicted). Each image
 (the HUD's "calls" number goes up with visible covers); an atlas would batch them later.
 Unverified: that the image CDN serves 160/320/640 for every cover; check `image ... failed` lines.
 
-## Quality indicator (player screen, top left)
-* Grey chip: the service's own label (`LOSSLESS`, `HI RES LOSSLESS`...), shown as given.
-* Green chip: what the decoder received: codec, bits (when the decoder knows them) and sample rate.
-* Line under the title: `SDL output: <rate> · <channels> · <driver>`. This is the format SDL reports for the device
-  it opened. SDL (and the TV's mixer) may still convert to the hardware format afterwards; the app cannot see that.
-  To see the real hardware format on the TV, over ssh during playback: `cat /proc/asound/card*/pcm*p/sub*/hw_params`
-  (path not verified on webOS).
+## Quality badge (player screen top left; the same one in the mini bar)
+* One chip, showing what the decoder received: codec, bits (when the decoder knows them) and sample rate —
+  e.g. `FLAC · 24-bit / 96 kHz`. No tier name is shown, like the official client.
+* The chip's colour is the tier (`tide_core::quality::Quality::of_stream`): grey = Low, cyan = High, white =
+  Lossless, amber = Max/HiRes. The official client merges Lossless and HiRes into MAX; here they stay separate.
+* The device format is no longer drawn under the artist. It is logged instead:
+  `audio: device opened at <rate> Hz, <ch> ch (asked ...)`. SDL (and the TV's mixer) may still convert to the
+  hardware format afterwards; the app cannot see that. To see the real hardware format on the TV, over ssh during
+  playback: `cat /proc/asound/card*/pcm*p/sub*/hw_params` (path not verified on webOS).
 * Lossy codecs show no bit depth (none exists) and no bitrate (not measured yet).
 * The mock backend sends fake details so the layout can be seen in the simulator.
 

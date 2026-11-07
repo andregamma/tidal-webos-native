@@ -13,5 +13,7 @@
   "nativeLifeCycleInterfaceVersion": 2,
   "handlesRelaunch": false,
   "transparent": false,
-  "requiredMemory": 256
+  "requiredMemory": 256,
+  "resolution": "1920x1080",
+  "screenSaverProperties": { "preferredType": 2 }
 }

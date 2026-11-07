@@ -37,14 +37,14 @@ fn default_scope() -> String {
 
 impl Config {
     /// Credentials are *never* compiled in. Sources, in order:
-    /// env `TIDE_CLIENT_ID` + `TIDE_CLIENT_SECRET` (+ optional `TIDE_AUTH_BASE`),
+    /// env `TIDAL_CLIENT_ID` + `TIDAL_CLIENT_SECRET` (+ optional `TIDAL_AUTH_BASE`),
     /// then `<data_dir>/config.json`.
     pub fn load() -> Result<Config, String> {
-        if let (Ok(id), Ok(secret)) = (env::var("TIDE_CLIENT_ID"), env::var("TIDE_CLIENT_SECRET")) {
+        if let (Ok(id), Ok(secret)) = (env::var("TIDAL_CLIENT_ID"), env::var("TIDAL_CLIENT_SECRET")) {
             return Ok(Config {
                 client_id: id,
                 client_secret: secret,
-                auth_base: env::var("TIDE_AUTH_BASE").unwrap_or_else(|_| default_auth_base()),
+                auth_base: env::var("TIDAL_AUTH_BASE").unwrap_or_else(|_| default_auth_base()),
                 scope: default_scope(),
             });
         }
@@ -58,7 +58,7 @@ impl Config {
         candidates.push(PathBuf::from("/media/developer/tide-tv/config.json"));
         let Some(path) = candidates.iter().find(|p| p.is_file()) else {
             return Err(format!(
-                "Missing client credentials. Set TIDE_CLIENT_ID and TIDE_CLIENT_SECRET, or create {}",
+                "Missing client credentials. Set TIDAL_CLIENT_ID and TIDAL_CLIENT_SECRET, or create {}",
                 candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(" or ")
             ));
         };

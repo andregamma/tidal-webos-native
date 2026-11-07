@@ -9,7 +9,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom},
     sync::{Arc, Condvar, Mutex},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use symphonia::core::io::MediaSource;
 use tide_core::services::{StreamSource, StreamSpec};
@@ -18,9 +18,62 @@ use tide_core::services::{StreamSource, StreamSpec};
 struct Buf {
     data: Vec<u8>,
     total: Option<u64>,
+    /// HTTP status and content type of the stream request, for messages that name the problem.
+    status: Option<u16>,
+    content_type: Option<String>,
     done: bool,
     error: Option<String>,
     stop: bool,
+}
+
+/// Enough of the body to tell a container from a playlist or an error page.
+const HEAD: usize = 16;
+/// How long `open` waits for those bytes before letting the decoder wait instead.
+const HEAD_WAIT: Duration = Duration::from_secs(20);
+
+/// What the first bytes of the stream look like.
+#[derive(Debug, PartialEq, Eq)]
+enum Head {
+    /// A container the probe can be handed: FLAC, MP4/CMAF, WAV, MP3, Ogg.
+    Audio,
+    /// An HLS playlist (a list of segment URLs). Not streamable here.
+    Hls,
+    /// Anything else: an error page, JSON, or a format nobody here handles.
+    Other,
+}
+
+fn classify(head: &[u8]) -> Head {
+    let h = head;
+    if h.starts_with(b"fLaC") || h.starts_with(b"RIFF") || h.starts_with(b"ID3") || h.starts_with(b"OggS") {
+        return Head::Audio;
+    }
+    // MP4/CMAF (also the DASH init segment): the `ftyp` box starts at offset 4.
+    if h.len() >= 8 && &h[4..8] == b"ftyp" {
+        return Head::Audio;
+    }
+    if h.starts_with(b"#EXTM3U") {
+        return Head::Hls;
+    }
+    Head::Other
+}
+
+/// ` (HTTP 403, text/html)` when known; appended to a failure so the cause is not guessed.
+fn describe_http(b: &Buf) -> String {
+    let mut out = String::new();
+    if let Some(s) = b.status {
+        out.push_str(&format!("HTTP {s}"));
+    }
+    if let Some(ct) = &b.content_type {
+        if !out.is_empty() {
+            out.push_str(", ");
+        }
+        out.push_str(ct);
+    }
+    if out.is_empty() {
+        String::new()
+    } else {
+        format!(" ({out})")
+    }
 }
 
 type Shared = Arc<(Mutex<Buf>, Condvar)>;
@@ -72,7 +125,47 @@ impl ProgressiveSource {
                 cv.notify_all();
             })
             .map_err(|e| e.to_string())?;
-        Ok(Self { shared, pos: 0 })
+        let src = Self { shared, pos: 0 };
+        // The decoder reports a bad stream as "unsupported" and hides the HTTP error that
+        // caused it; catching the first bytes here keeps the real cause in the message.
+        src.check_head()?;
+        Ok(src)
+    }
+
+    fn check_head(&self) -> Result<(), String> {
+        let (m, cv) = &*self.shared;
+        let mut g = m.lock().unwrap_or_else(|e| e.into_inner());
+        let deadline = Instant::now() + HEAD_WAIT;
+        loop {
+            if g.data.len() >= HEAD {
+                break;
+            }
+            if let Some(e) = &g.error {
+                return Err(e.clone());
+            }
+            if g.done {
+                if g.data.is_empty() {
+                    return Err(format!("The stream sent no data{}", describe_http(&g)));
+                }
+                break;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break; // slow start: let the decoder wait instead of failing here
+            }
+            g = cv
+                .wait_timeout(g, left.min(Duration::from_millis(500)))
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        match classify(&g.data) {
+            Head::Audio => Ok(()),
+            Head::Hls => Err("The service sent an HLS playlist, which this player cannot stream".into()),
+            Head::Other => Err(format!(
+                "The stream is not audio this player understands{}",
+                describe_http(&g)
+            )),
+        }
     }
 }
 
@@ -94,9 +187,13 @@ fn download_single(url: &str, shared: &Shared) -> Result<(), String> {
         ureq::Error::Status(code, _) => format!("stream request failed (HTTP {code})"),
         ureq::Error::Transport(t) => format!("network error: {}", t.kind()),
     })?;
-    if let Some(len) = resp.header("Content-Length").and_then(|v| v.parse::<u64>().ok()) {
+    {
         let (m, cv) = &**shared;
-        m.lock().unwrap_or_else(|e| e.into_inner()).total = Some(len);
+        let mut g = m.lock().unwrap_or_else(|e| e.into_inner());
+        g.status = Some(resp.status());
+        g.content_type = resp.header("Content-Type").map(str::to_string);
+        g.total = resp.header("Content-Length").and_then(|v| v.parse::<u64>().ok());
+        drop(g);
         cv.notify_all();
     }
     let mut r = resp.into_reader();
@@ -212,11 +309,45 @@ impl Seek for ProgressiveSource {
 
 impl MediaSource for ProgressiveSource {
     fn is_seekable(&self) -> bool {
-        true
+        // Until the length is known a seek to the end cannot be answered — and `isomp4` rejects
+        // a source that claims to be seekable without one ("seek error: stream is not
+        // seekable"), which is what a DASH stream looks like while its segments download. As a
+        // plain stream the demuxer reads the fragments as they arrive.
+        self.byte_len().is_some()
     }
 
     fn byte_len(&self) -> Option<u64> {
         let g = self.shared.0.lock().unwrap_or_else(|e| e.into_inner());
         g.total.or(if g.done { Some(g.data.len() as u64) } else { None })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The first bytes are what decides between "hand this to the decoder" and a message that
+    /// names the real problem.
+    #[test]
+    fn the_first_bytes_tell_audio_from_a_playlist_or_an_error_page() {
+        assert_eq!(classify(b"fLaC\0\0\0\0"), Head::Audio);
+        assert_eq!(classify(b"RIFF\0\0\0\0WAVE"), Head::Audio);
+        assert_eq!(classify(b"\0\0\0\x20ftypM4A "), Head::Audio); // MP4 / DASH init
+        assert_eq!(classify(b"#EXTM3U\n#EXT-X-VERSION:3\n"), Head::Hls);
+        assert_eq!(classify(b"{\"status\":401}"), Head::Other);
+        assert_eq!(classify(b"<html><head>"), Head::Other);
+    }
+
+    /// Claiming to be seekable without a length makes `isomp4` fail the whole stream, which is
+    /// what a DASH download (no `Content-Length`) used to do.
+    #[test]
+    fn a_stream_without_a_known_length_does_not_claim_to_be_seekable() {
+        let shared: Shared = Arc::new((Mutex::new(Buf::default()), Condvar::new()));
+        let src = ProgressiveSource { shared: Arc::clone(&shared), pos: 0 };
+        assert!(!src.is_seekable());
+
+        shared.0.lock().unwrap().total = Some(64);
+        assert!(src.is_seekable());
+        assert_eq!(src.byte_len(), Some(64));
     }
 }

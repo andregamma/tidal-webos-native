@@ -18,6 +18,7 @@ use tide_core::input::Key;
 const WEBOS_HOME: i32 = 384;
 const WEBOS_BACK: i32 = 482;
 const WEBOS_RED: i32 = 486;
+const WEBOS_GREEN: i32 = 487;
 const WEBOS_EXIT: i32 = 505;
 // Upstream scancodes whose keycodes the `sdl2` crate does not know.
 const AUDIO_REWIND: i32 = 285;
@@ -36,6 +37,8 @@ pub fn take_hud_toggles() -> i32 {
 fn map_webos(scancode: i32) -> Option<Key> {
     match scancode {
         WEBOS_BACK => Some(Key::Back),
+        // Green opens Settings on the audio-quality field; red toggles the HUD (see `watch`).
+        WEBOS_GREEN => Some(Key::Quality),
         AUDIO_REWIND => Some(Key::Left),
         AUDIO_FAST_FORWARD => Some(Key::Right),
         // Home/Exit are handled by the system (launcher); do not act on them.

@@ -4,7 +4,7 @@
 //! window/GL-context/input parts of this file; `tide-core` and `tide-gfx`
 //! stay untouched. Keyboard emulates the remote:
 //!   arrows = D-pad, Enter = OK, Esc/Backspace = Back, Space/P = Play/Pause,
-//!   N/B = Next/Prev, F3 = fps HUD.
+//!   N/B = Next/Prev, Q = audio quality (green on the remote), F3 = fps HUD.
 
 use std::{
     env,
@@ -123,6 +123,7 @@ fn map_key(k: Keycode) -> Option<Key> {
         Keycode::Space | Keycode::P => Key::PlayPause,
         Keycode::N | Keycode::AudioNext => Key::Next,
         Keycode::B | Keycode::AudioPrev => Key::Prev,
+        Keycode::Q => Key::Quality,
         // Remote media buttons (webOS maps Play/Stop/Rew/FF to these).
         Keycode::AudioPlay => Key::PlayPause,
         Keycode::AudioStop => Key::Back,
@@ -178,7 +179,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Saved app settings (language). The backend reads the same file on its own thread; the core does
     // no I/O, so it is handed the value here.
     let saved = tide_api::settings::Settings::load();
-    logf!("language: {}", saved.locale);
+    let saved_quality = tide_core::quality::Quality::parse(&saved.audio_quality).unwrap_or_default();
+    logf!("language: {}, audio quality: {}", saved.locale, saved_quality.label());
     let shot = opts.screenshot.is_some();
     let (win_w, win_h) = opts.size.unwrap_or(if shot { (1920, 1080) } else { (1280, 720) });
 
@@ -230,7 +232,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             tier: None,
         }));
     }
-    let mut app = App::new(ch.app, theme, opts.start).with_locale(&saved.locale);
+    let mut app = App::new(ch.app, theme, opts.start)
+        .with_locale(&saved.locale)
+        .with_quality(saved_quality);
     let mut list = DrawList::new();
     let loader = tide_img::Loader::new(2);
     let mut events = sdl.event_pump()?;

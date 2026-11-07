@@ -8,6 +8,9 @@ members = [
     "crates/tide-api",
     "crates/tide-sdl",
 ]
+# The sign-in relay is a Cloudflare Worker with its own (wasm) workspace: host builds here must not
+# try to compile it. See `docs/relay.md`.
+exclude = ["crates/tide-relay"]
 
 [workspace.package]
 version = "0.1.0"

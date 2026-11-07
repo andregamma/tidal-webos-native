@@ -31,10 +31,18 @@ const PREFER_BELOW: usize = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectOption {
-    /// Stable value (e.g. `pt-BR`), shown dimmed at the right of the row.
+    /// Stable value (e.g. `pt-BR`), shown dimmed at the right of the row unless it only repeats the
+    /// label in another case (e.g. quality `max` / `Max`).
     pub value: String,
     /// What the user reads (e.g. `Português (Brasil)`).
     pub label: String,
+}
+
+impl SelectOption {
+    /// The value is worth a column of its own when it says more than the label does.
+    fn shows_value(&self) -> bool {
+        !self.value.eq_ignore_ascii_case(&self.label)
+    }
 }
 
 /// What a key press did.
@@ -197,7 +205,9 @@ impl Select {
         let caret_color = if focused { t.accent } else { t.text_dim };
         let ty = |size: f32| rect.y + (rect.h - size * 1.2) / 2.0;
         ui::text_right(out, cx.m, rect.right() - 36.0, ty(34.0), 34.0, caret_color, caret);
-        ui::text_right(out, cx.m, rect.right() - 96.0, ty(26.0), 26.0, t.text_dim, &opt.value);
+        if opt.shows_value() {
+            ui::text_right(out, cx.m, rect.right() - 96.0, ty(26.0), 26.0, t.text_dim, &opt.value);
+        }
         let label = fit_text(cx.m, &opt.label, 34.0, rect.w - 36.0 - 180.0);
         out.text(rect.x + 36.0, ty(34.0), 34.0, t.text, &label);
     }
@@ -235,15 +245,17 @@ impl Select {
             let label = fit_text(cx.m, &o.label, 32.0, p.w - 72.0 - 36.0 - 170.0);
             let color = if chosen { t.accent } else { t.text };
             out.text(rows.x + 72.0, y + (ROW_H - 32.0 * 1.2) / 2.0, 32.0, color.mul_alpha(a), &label);
-            ui::text_right(
-                out,
-                cx.m,
-                rows.right() - 36.0,
-                y + (ROW_H - 26.0 * 1.2) / 2.0,
-                26.0,
-                t.text_dim.mul_alpha(a),
-                &o.value,
-            );
+            if o.shows_value() {
+                ui::text_right(
+                    out,
+                    cx.m,
+                    rows.right() - 36.0,
+                    y + (ROW_H - 26.0 * 1.2) / 2.0,
+                    26.0,
+                    t.text_dim.mul_alpha(a),
+                    &o.value,
+                );
+            }
         }
         let n = self.options.len();
         if n > self.visible {

@@ -15,6 +15,17 @@ pub fn run(be: BackendSide) {
                 send(Evt::LoginRequired);
             }
             Cmd::StartLogin => {
+                // Primary flow: the phone signs in, then pastes the address it gets on the relay.
+                sleep(Duration::from_millis(400));
+                send(Evt::PkceLogin {
+                    qr_url: "https://login.tidal.com/authorize?client_id=demo".into(),
+                    paste_url: Some("https://tidal-relay.andregama.dev/paste/abc".into()),
+                    expires_in: 180,
+                });
+                sleep(Duration::from_millis(4500));
+                send(Evt::LoggedIn { max_quality: Some("HI_RES_LOSSLESS".into()) });
+            }
+            Cmd::StartLoginFallback => {
                 sleep(Duration::from_millis(400));
                 send(Evt::LoginCode {
                     user_code: "XK7M2".into(),
@@ -23,8 +34,9 @@ pub fn run(be: BackendSide) {
                     expires_in: 300,
                 });
                 sleep(Duration::from_millis(4500));
-                send(Evt::LoggedIn);
+                send(Evt::LoggedIn { max_quality: Some("LOSSLESS".into()) });
             }
+            Cmd::CancelLogin => send(Evt::LoginCancelled),
             Cmd::Logout => {}
             Cmd::Play { track_id, duration } => {
                 let source = StreamSource::Simulated;
@@ -45,6 +57,9 @@ pub fn run(be: BackendSide) {
             Cmd::SetLocale(code) => {
                 // Same persistence as the real backend, so the simulator remembers the language too.
                 settings::save_locale(&code);
+            }
+            Cmd::SetQuality(q) => {
+                settings::save_quality(q.id());
             }
             Cmd::LoadLyrics(id) => {
                 sleep(Duration::from_millis(250));

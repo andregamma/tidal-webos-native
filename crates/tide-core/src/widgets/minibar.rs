@@ -14,8 +14,8 @@ use crate::draw::DrawList;
 use crate::geom::{Color, Rect};
 use crate::input::Key;
 use crate::model::NowPlaying;
+use crate::quality::Quality;
 use crate::screens::sidebar::COLLAPSED_W;
-use crate::services::StreamInfo;
 use crate::text::fit_text;
 use crate::theme::Theme;
 use crate::{ui, Cx, H, W};
@@ -147,11 +147,15 @@ impl MiniBar {
         Self::button(out, t, open, focused && self.sel == BTN_OPEN);
         ui::text_centered(out, cx.m, open, 44.0, t.text, "⌃");
 
-        // Quality chip, left of the open button.
-        if let Some(label) = np.quality.and_then(quality_label) {
+        // Quality chip, left of the open button: the stream's own specs, coloured by its tier.
+        if let Some(label) = np.quality.and_then(Quality::specs) {
+            let (bg, fg) = np
+                .quality
+                .and_then(Quality::of_stream)
+                .map_or((t.surface_focus, t.text_dim), |q| (q.chip_bg(), q.color()));
             let w = cx.m.text_width(&label, 22.0) + 32.0;
             let x = open.x - 24.0 - w;
-            ui::chip(out, cx.m, x, cy - (22.0 * 1.2 + 20.0) / 2.0, &label, 22.0, t.accent.with_alpha(0.18), t.accent);
+            ui::chip(out, cx.m, x, cy - (22.0 * 1.2 + 20.0) / 2.0, &label, 22.0, bg, fg);
         }
 
         out.set_alpha(1.0);
@@ -164,23 +168,13 @@ impl Default for MiniBar {
     }
 }
 
-/// `16-bit 44.1 kHz` for lossless, `AAC 44.1 kHz` for lossy; nothing until the codec is known.
-fn quality_label(i: &StreamInfo) -> Option<String> {
-    if i.codec.is_empty() {
-        return None;
-    }
-    Some(match i.src_bits {
-        Some(b) => format!("{b}-bit {}", ui::fmt_khz(i.src_rate)),
-        None => format!("{} {}", i.codec, ui::fmt_khz(i.src_rate)),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::draw::Cmd;
     use crate::images::NoImages;
     use crate::model::Track;
+    use crate::services::StreamInfo;
     use crate::text::MonoMetrics;
     use crate::theme::Theme;
 
@@ -254,13 +248,15 @@ mod tests {
     }
 
     #[test]
-    fn quality_chip_follows_what_the_decoder_reported() {
-        let mut i = StreamInfo { codec: "FLAC".into(), src_rate: 44_100, src_bits: Some(24), ..Default::default() };
-        assert_eq!(quality_label(&i).as_deref(), Some("24-bit 44.1 kHz"));
+    fn quality_chip_shows_the_stream_specs_in_the_tier_colour() {
+        // The same specs and colours the full player uses (see `quality::Quality`).
+        let mut i = StreamInfo { codec: "FLAC".into(), src_rate: 44_100, src_bits: Some(24), tier: Some("HI_RES".into()), ..Default::default() };
+        assert_eq!(Quality::specs(&i).as_deref(), Some("FLAC · 24-bit / 44.1 kHz"));
+        assert_eq!(Quality::of_stream(&i), Some(Quality::Max));
         i.src_bits = None;
         i.codec = "AAC".into();
-        assert_eq!(quality_label(&i).as_deref(), Some("AAC 44.1 kHz"));
-        i.codec.clear();
-        assert_eq!(quality_label(&i), None);
+        i.tier = Some("HIGH".into());
+        assert_eq!(Quality::specs(&i).as_deref(), Some("AAC · 44.1 kHz"));
+        assert_eq!(Quality::of_stream(&i), Some(Quality::High));
     }
 }

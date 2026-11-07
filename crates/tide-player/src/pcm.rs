@@ -182,6 +182,10 @@ impl PcmPort {
         self.lock().paused = paused;
     }
 
+    pub fn is_paused(&self) -> bool {
+        self.lock().paused
+    }
+
     /// Position of the sample currently being played, in seconds.
     pub fn position_secs(&self) -> f64 {
         let s = self.lock();

@@ -69,8 +69,10 @@ because a `Resume` would reach no stream. Selecting the track that is already pl
   frame, 6 vertices per quad instead of indices/instancing.
 
 ## 5. Service seam
-Protocol (M1): `Cmd::{Boot, StartLogin, Logout, LoadHome, LoadLiked, LoadLyrics, LoadAccount, SetLocale}`,
-`Evt::{LoginRequired, LoginCode, LoggedIn, LoginFailed, Home, Liked, Account, Lyrics, Error}`.
+Protocol (M1): `Cmd::{Boot, StartLogin, StartLoginFallback, CancelLogin, Logout, LoadHome, LoadLiked,
+LoadLyrics, LoadAccount, SetLocale}`,
+`Evt::{LoginRequired, PkceLogin, FallbackOffered, LoginCancelled, LoginCode, LoggedIn{max_quality},
+LoginFailed, Home, Liked, Account, Lyrics, Error}`.
 `tide-api::tidlers_backend` adapts the `tidlers` crate (async, own tokio runtime) to this protocol.
 
 `services.rs` defines `Cmd` (UI → backend) and `Evt` (backend → UI). The UI
@@ -82,17 +84,27 @@ Alternative backend (POC, cargo feature `tidlers`): `tide-api::tidlers_backend` 
 `tidlers` crate to the same protocol; see `docs/tidlers-poc.md` for findings and status.
 
 Settings & language: the Settings page (`screens/settings.rs`, with the reusable `widgets/select.rs`) shows the
-account (`Evt::Account`: name, e-mail, plan) and a language select fed by `tide_core::i18n::LANGUAGES` (codes like
-`pt-BR`). Picking one sends `Cmd::SetLocale`; the real backend stores it, sets `client.session.locale` on the live
-client and in `new_client` for every later one, and persists it through `tide_api::settings` (`tide-settings.json`,
-same multi-location storage as the session, kept across logout). `tide-sdl` loads it at start and gives it to
-`App::with_locale`; `App::locale()` is the key for the app's own i18n texts.
+account (`Evt::Account`: name, e-mail, plan), an **audio quality** select (`tide_core::quality::Quality`:
+Low/High/Lossless/Max, Max = HiRes) and a language select fed by `tide_core::i18n::LANGUAGES` (codes like
+`pt-BR`). Up/Down move between the two fields; OK opens a list. Picking a language sends `Cmd::SetLocale`, picking
+a quality `Cmd::SetQuality`; the real backend stores both, applies them to the live client and every later one
+(`new_client`), and persists them through `tide_api::settings` (`tide-settings.json`, same multi-location storage as
+the session, kept across logout). `tide-sdl` loads them at start and gives them to `App::with_locale` /
+`App::with_quality`; `App::locale()` is the key for the app's own i18n texts. The quality is a *ceiling request*:
+the backend caps it by the account's `highestSoundQuality` at play time, so the default `max` means "the best this
+account can stream". `TIDAL_QUALITY` still overrides both, for debugging.
 
-Audio: `tide-player` (decode + PCM queue) with SDL output in `tide-sdl`; see `docs/audio.md`.
+Player shortcut: `Key::Quality` (keyboard `Q`, the remote's green button, scancode 487) opens Settings with the
+focus on the audio-quality field (`Action::OpenQuality`).
+
+Audio: `tide-player` (decode + PCM queue) with SDL output in `tide-sdl`; see `docs/audio.md`. The player shows one
+quality badge with the stream's own specs (`FLAC · 24-bit / 96 kHz`), coloured by tier (grey/low, cyan/high,
+white/lossless, amber/max); the device format is only logged (`audio: device opened at ...`).
 
 ## 6. Roadmap
-* **M1 Auth (done, untested against the real service)**: device-code flow, real QR,
-  token persistence + refresh. See `docs/auth.md`.
+* **M1 Auth (done, untested against the real service)**: PKCE (HiRes) whose callback comes back through
+  a small Worker relay — nothing is served from the TV, so any network works — and the device-code flow as
+  fallback (CD), real QR, token persistence + refresh. See `docs/auth.md` and `docs/relay.md`.
 * **M2 Data**: real Home/Liked; async image loading → textures (add an `Image`
   command + texture cache with LRU; replace `ui::art`).
 * **M3 Player (first cut done, see docs/audio.md)**: new `tide-player` crate/thread (HTTP range streamer + decoder

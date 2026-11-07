@@ -1,0 +1,7 @@
+/target
+/build
+/node_modules
+/.wrangler
+
+# Local Worker secrets/overrides (never committed).
+/.dev.vars

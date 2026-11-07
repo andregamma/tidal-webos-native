@@ -6,6 +6,7 @@ pub mod settings;
 pub mod sidebar;
 
 use crate::model::Track;
+use crate::quality::Quality;
 use crate::services::PlayerCmd;
 
 /// What a screen asks the app to do after handling a key.
@@ -17,6 +18,12 @@ pub enum Action {
     FocusBar,
     Back,
     RetryLogin,
+    /// Sign in with the device-code fallback (CD quality) instead of PKCE.
+    UseFallback,
+    /// Stop waiting for the PKCE callback (closes the LAN server).
+    CancelLogin,
+    /// Signed in: go to the library.
+    Continue,
     /// Show a short message.
     Toast(String),
     Play(Track),
@@ -24,4 +31,8 @@ pub enum Action {
     Transport(PlayerCmd),
     /// The user picked a language (code from `i18n::LANGUAGES`, e.g. `pt-BR`).
     SetLocale(String),
+    /// The user picked a streaming quality (Settings page).
+    SetQuality(Quality),
+    /// Open Settings on the audio-quality field (the player's shortcut).
+    OpenQuality,
 }

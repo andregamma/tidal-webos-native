@@ -13,6 +13,7 @@ pub mod i18n;
 pub mod images;
 pub mod input;
 pub mod model;
+pub mod quality;
 pub mod screens;
 pub mod services;
 pub mod text;

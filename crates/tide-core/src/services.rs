@@ -64,8 +64,12 @@ pub enum Cmd {
     Play { track_id: u64, duration: f32 },
     /// App start: restore (and refresh) a saved session if there is one.
     Boot,
-    /// Begin the device-code login flow.
+    /// Sign in. PKCE is tried first, because it is the flow that yields HiRes.
     StartLogin,
+    /// Skip PKCE and use the device-code (QR + short code) fallback: at most CD quality.
+    StartLoginFallback,
+    /// Abandon a sign-in that is waiting for the PKCE callback: the LAN server is closed.
+    CancelLogin,
     /// Forget the saved session.
     Logout,
     LoadHome,
@@ -76,16 +80,30 @@ pub enum Cmd {
     /// Change the language at runtime and persist it. Carries a code from `i18n::LANGUAGES`
     /// (`pt-BR`); the backend applies it to the service client and saves it.
     SetLocale(String),
+    /// Change the streaming quality preference and persist it. The backend caps it by what the
+    /// account can stream; `Max` (the default) means "the best available".
+    SetQuality(crate::quality::Quality),
 }
 
 #[derive(Debug)]
 pub enum Evt {
     /// No usable saved session: the UI should start the login flow.
     LoginRequired,
-    /// Show this to the user. `qr_url` is the full link to encode in the QR.
+    /// PKCE (primary flow). `qr_url` is the service's sign-in page; `paste_url`, when the relay sends
+    /// one, is the page where the phone pastes the address it gets after signing in (the code goes to
+    /// the client's own registered page, not to the relay). The phone can be on any network: nothing
+    /// has to reach this TV (see `docs/relay.md`).
+    PkceLogin { qr_url: String, paste_url: Option<String>, expires_in: u32 },
+    /// PKCE could not be completed but the service is reachable: offer the device-code fallback
+    /// (CD quality) with this reason.
+    FallbackOffered(String),
+    /// `Cmd::CancelLogin` took effect: nothing is waiting any more.
+    LoginCancelled,
+    /// Device-code fallback. `qr_url` is the full link to encode in the QR.
     LoginCode { user_code: String, verify_url: String, qr_url: String, expires_in: u32 },
-    /// Login or session restore succeeded.
-    LoggedIn,
+    /// Login or session restore succeeded. `max_quality` is the account's highest sound quality as
+    /// reported by the service (`HI_RES_LOSSLESS`, `LOSSLESS`...), when it could be read.
+    LoggedIn { max_quality: Option<String> },
     /// Login cannot continue (bad config, denied, network). Shown on the login screen.
     LoginFailed(String),
     Home(Vec<Shelf>),
@@ -97,6 +115,9 @@ pub enum Evt {
     StreamInfo(StreamInfo),
     /// Playback position in seconds (about 4 per second while playing).
     Position(f32),
+    /// A seek landed: playback resumes here. A DASH stream can only resume on a segment boundary,
+    /// so this can be a little earlier than the requested time; the bar adopts it as-is.
+    Seeked(f32),
     TrackEnded,
     PlaybackError(String),
     Error(String),

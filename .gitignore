@@ -1,5 +1,60 @@
-/target
-/shots
+# ---- Rust / Cargo -----------------------------------------------------------
+# Build output (root workspace and excluded crates such as tide-relay).
+target/
+*.rs.bk
+*.profraw
+*.profdata
+# Cargo.lock IS committed on purpose (binaries: reproducible builds).
+
+# ---- webOS build output -----------------------------------------------------
+# ci/webos-build.sh writes the NDK SDK clone, SDL build and stripped libs here,
+# and the packaged .ipk into dist/. --screenshot/--shots output goes to shots/.
+/build/
+/dist/
+/shots/
 *.ipk
-/build
-/dist
+*.ipk.old
+*.ipkg
+
+# ---- Cloudflare Worker relay (crates/tide-relay) ----------------------------
+# worker-build output, wrangler state and npm deps; local secrets never ship.
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+.envrc
+
+# ---- Python (packaging/mkipk.py, ci scripts) --------------------------------
+__pycache__/
+*.py[cod]
+.python-version
+.venv/
+venv/
+
+# ---- Logs and crash dumps ---------------------------------------------------
+# e.g. `ares-pull ... tide.log .`, `tide.log.old` from the TV.
+*.log
+tide-data/
+core
+core.*
+*.dSYM/
+
+# ---- Editors / OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+*.orig
+*.rej
+
+# ---- App specific ------------------------------------------------------
+tide-settings.json
+tide.log*
+tidlers-session.json

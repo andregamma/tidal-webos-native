@@ -13,7 +13,7 @@ use symphonia::core::{
     codecs::DecoderOptions,
     errors::Error as SymError,
     formats::{FormatOptions, SeekMode, SeekTo},
-    io::MediaSourceStream,
+    io::{MediaSource, MediaSourceStream},
     meta::MetadataOptions,
     probe::Hint,
     units::Time,
@@ -28,6 +28,12 @@ struct Ctl {
     stop: AtomicBool,
     done: AtomicBool,
     seek: Mutex<Option<f64>>,
+    /// The user asked for a pause. Separate from the mute applied while a seek is in flight,
+    /// which must not outlive the seek when the user was playing.
+    paused_by_user: AtomicBool,
+    /// Whether the open stream can be seeked in place (one file). A segmented stream cannot:
+    /// a seek there means reopening the download, so the player goes silent in the meantime.
+    seekable: AtomicBool,
 }
 
 enum Active {
@@ -67,6 +73,19 @@ fn stop_active(active: &mut Option<Active>) {
     }
 }
 
+/// Undo the mute applied for a seek, unless the user paused in the meantime.
+fn unmute_if_playing(ctl: &Ctl, port: &PcmPort) {
+    if !ctl.paused_by_user.load(Ordering::SeqCst) {
+        port.set_paused(false);
+    }
+}
+
+/// A newer seek landed while the previous one was being opened. Confirming the old one would move
+/// the bar back to it for a moment, so the next restart reports where playback really resumed.
+fn superseded(ctl: &Ctl) -> bool {
+    ctl.seek.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+}
+
 fn handle(cmd: PlayerCmd, active: &mut Option<Active>, port: &PcmPort, tx: &Sender<Evt>) {
     match cmd {
         PlayerCmd::Load(spec) => {
@@ -100,13 +119,30 @@ fn handle(cmd: PlayerCmd, active: &mut Option<Active>, port: &PcmPort, tx: &Send
             let pause = matches!(cmd, PlayerCmd::Pause);
             match active {
                 Some(Active::Sim { paused, .. }) => *paused = pause,
-                Some(Active::Real(_)) => port.set_paused(pause),
+                Some(Active::Real(ctl)) => {
+                    ctl.paused_by_user.store(pause, Ordering::SeqCst);
+                    port.set_paused(pause);
+                }
                 None => {}
             }
         }
         PlayerCmd::Seek(s) => match active {
-            Some(Active::Sim { pos, dur, .. }) => *pos = s.clamp(0.0, *dur),
-            Some(Active::Real(ctl)) => *ctl.seek.lock().unwrap_or_else(|e| e.into_inner()) = Some(s.max(0.0) as f64),
+            Some(Active::Sim { pos, dur, .. }) => {
+                *pos = s.clamp(0.0, *dur);
+                // The demo has no audio to open: the seek is done as soon as it is asked for.
+                let _ = tx.send(Evt::Seeked(*pos));
+            }
+            Some(Active::Real(ctl)) => {
+                let t = s.max(0.0) as f64;
+                *ctl.seek.lock().unwrap_or_else(|e| e.into_inner()) = Some(t);
+                if !ctl.seekable.load(Ordering::SeqCst) {
+                    // A DASH seek means reopening the download, which takes a moment: go silent and
+                    // drop what is queued now, so the old position does not keep playing (the flush
+                    // also wakes the decoder, which is otherwise blocked pushing into a full queue).
+                    port.flush(t);
+                    port.set_paused(true);
+                }
+            }
             None => {}
         },
         PlayerCmd::Stop => {
@@ -147,12 +183,51 @@ fn tick(dt: f32, active: &mut Option<Active>, port: &PcmPort, tx: &Sender<Evt>) 
 }
 
 fn session(spec: StreamSpec, ctl: Arc<Ctl>, port: PcmPort, tx: Sender<Evt>) {
-    if let Err(e) = play_stream(&spec, &ctl, &port, &tx) {
-        if !ctl.stop.load(Ordering::SeqCst) {
-            let _ = tx.send(Evt::PlaybackError(e));
+    // A DASH stream cannot be seeked in place, so a seek restarts the download at the segment
+    // that holds that time and rebuilds the demuxer from the init segment.
+    let mut current = spec.clone();
+    let mut start_at = 0.0f64;
+    loop {
+        match play_stream(&current, &ctl, &port, &tx, start_at) {
+            Ok(None) => break,
+            Ok(Some(t)) => match seek_spec(&spec, t) {
+                Some((next, at)) => {
+                    current = next;
+                    start_at = at;
+                }
+                // Nothing to seek: drop the request and keep playing from where it is.
+                None => {}
+            },
+            Err(e) => {
+                if !ctl.stop.load(Ordering::SeqCst) {
+                    let _ = tx.send(Evt::PlaybackError(e));
+                }
+                break;
+            }
         }
     }
     ctl.done.store(true, Ordering::SeqCst);
+}
+
+/// Where playback resumes: the segment that contains `t`, plus the time that segment begins at
+/// (a seek can only land on a segment boundary). `None` when the stream is a single file.
+fn seek_spec(spec: &StreamSpec, t: f64) -> Option<(StreamSpec, f64)> {
+    let StreamSource::Segmented { init, template, start_number, segment_secs } = &spec.source else {
+        return None;
+    };
+    let secs = f64::from(*segment_secs);
+    if secs <= 0.0 {
+        return None;
+    }
+    let step = (t.max(0.0) / secs).floor() as u32;
+    let mut next = spec.clone();
+    next.source = StreamSource::Segmented {
+        init: init.clone(),
+        template: template.clone(),
+        start_number: start_number.saturating_add(step),
+        segment_secs: *segment_secs,
+    };
+    Some((next, f64::from(step) * secs))
 }
 
 fn ext_for(mime: &str) -> Option<&'static str> {
@@ -169,8 +244,27 @@ fn secs_of(t: Time) -> f64 {
     t.seconds as f64 + t.frac
 }
 
-fn play_stream(spec: &StreamSpec, ctl: &Ctl, port: &PcmPort, tx: &Sender<Evt>) -> Result<(), String> {
+/// What the service said it was sending, for messages that name the problem.
+fn stream_label(spec: &StreamSpec) -> String {
+    let mime = if spec.mime.is_empty() { "no mime" } else { spec.mime.as_str() };
+    match &spec.tier {
+        Some(t) if !t.is_empty() => format!("{mime}, {t}"),
+        _ => mime.to_string(),
+    }
+}
+
+fn play_stream(
+    spec: &StreamSpec,
+    ctl: &Ctl,
+    port: &PcmPort,
+    tx: &Sender<Evt>,
+    start_at: f64,
+) -> Result<Option<f64>, String> {
     let src = ProgressiveSource::open(spec)?;
+    // A segmented download has no length while it runs, so it cannot be seeked: say so before the
+    // source is moved into the stream and the demuxer reads it once.
+    let seekable = src.is_seekable();
+    ctl.seekable.store(seekable, Ordering::SeqCst);
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
     let mut hint = Hint::new();
     if !spec.mime.is_empty() {
@@ -181,18 +275,31 @@ fn play_stream(spec: &StreamSpec, ctl: &Ctl, port: &PcmPort, tx: &Sender<Evt>) -
     }
     let probed = symphonia::default::get_probe()
         .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
-        .map_err(|e| format!("Unsupported or unreadable stream: {e}"))?;
+        .map_err(|e| format!("Unsupported or unreadable stream ({}, {e})", stream_label(spec)))?;
     let mut format = probed.format;
-    let track = format.default_track().ok_or("The stream has no audio track")?.clone();
+    let track = format
+        .default_track()
+        .ok_or_else(|| format!("The stream has no audio track ({})", stream_label(spec)))?
+        .clone();
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| format!("No decoder for this stream: {e}"))?;
+        .map_err(|e| format!("No decoder for this stream ({}, {e})", stream_label(spec)))?;
 
     let rate = track.codec_params.sample_rate.ok_or("Unknown sample rate")?;
     let src_ch = track.codec_params.channels.map_or(2, |c| c.count());
     let out_ch = src_ch.clamp(1, 2); // more than 2 channels: first two only (no real downmix yet)
     port.configure(DeviceSpec { rate, channels: out_ch as u8 })?;
+    if start_at > 0.0 {
+        port.flush(start_at);
+    }
     let mut gen = port.generation();
+    // The player is muted while a seek is in flight (see `handle`); playback continues from here.
+    if !superseded(ctl) {
+        if start_at > 0.0 {
+            let _ = tx.send(Evt::Seeked(start_at as f32));
+        }
+        unmute_if_playing(ctl, port);
+    }
     if let Some((dev, driver)) = port.device_info() {
         let codec = symphonia::default::get_codecs()
             .get_codec(track.codec_params.codec)
@@ -214,15 +321,33 @@ fn play_stream(spec: &StreamSpec, ctl: &Ctl, port: &PcmPort, tx: &Sender<Evt>) -
     let mut tmp: Vec<f32> = Vec::new();
     loop {
         if ctl.stop.load(Ordering::SeqCst) {
-            return Ok(());
+            return Ok(None);
         }
         let wanted = ctl.seek.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(t) = wanted {
+            if !seekable {
+                // Handing this to `isomp4` leaves it pointing at samples it cannot reach again
+                // ("packet out-of-bounds for a non-seekable stream"), so restart instead.
+                return Ok(Some(t));
+            }
             let to = SeekTo::Time { time: Time::from(t), track_id: Some(track.id) };
-            if let Ok(done) = format.seek(SeekMode::Accurate, to) {
-                decoder.reset();
-                let base = time_base.map_or(t, |tb| secs_of(tb.calc_time(done.actual_ts)));
-                gen = port.flush(base);
+            match format.seek(SeekMode::Accurate, to) {
+                Ok(done) => {
+                    decoder.reset();
+                    let base = time_base.map_or(t, |tb| secs_of(tb.calc_time(done.actual_ts)));
+                    gen = port.flush(base);
+                    if !superseded(ctl) {
+                        let _ = tx.send(Evt::Seeked(base as f32));
+                        unmute_if_playing(ctl, port);
+                    }
+                }
+                // The demuxer refused: nothing moved, so tell the bar where playback still is.
+                Err(_) => {
+                    if !superseded(ctl) {
+                        let _ = tx.send(Evt::Seeked(port.position_secs() as f32));
+                        unmute_if_playing(ctl, port);
+                    }
+                }
             }
         }
 
@@ -258,12 +383,101 @@ fn play_stream(spec: &StreamSpec, ctl: &Ctl, port: &PcmPort, tx: &Sender<Evt>) -
             &tmp
         };
         if !port.push(samples, gen) && ctl.stop.load(Ordering::SeqCst) {
-            return Ok(());
+            return Ok(None);
         }
     }
 
     if port.wait_drained(gen) && !ctl.stop.load(Ordering::SeqCst) {
         let _ = tx.send(Evt::TrackEnded);
     }
-    Ok(())
+    Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dash_spec(start_number: u32) -> StreamSpec {
+        StreamSpec {
+            track_id: 7,
+            mime: "audio/mp4".into(),
+            duration: 240.0,
+            source: StreamSource::Segmented {
+                init: "https://cdn/x/init.mp4?token=t".into(),
+                template: "https://cdn/x/1-$Number$.mp4?token=t".into(),
+                start_number,
+                segment_secs: 4.0,
+            },
+            tier: Some("LOSSLESS".into()),
+        }
+    }
+
+    /// A DASH stream cannot be seeked in place, so the seek becomes "restart at the segment that
+    /// holds that time". Segment 100..104s is number 1 + 25 = 26 and begins at 100s.
+    #[test]
+    fn seeking_a_dash_stream_restarts_at_the_segment_that_holds_the_time() {
+        let (next, at) = seek_spec(&dash_spec(1), 103.9).expect("segmented stream");
+        assert_eq!(at, 100.0);
+        match next.source {
+            StreamSource::Segmented { start_number, .. } => assert_eq!(start_number, 26),
+            other => panic!("expected segments, got {other:?}"),
+        }
+    }
+
+    /// A single file is seeked in place by the demuxer; there is nothing to restart.
+    #[test]
+    fn a_single_file_stream_has_nothing_to_restart() {
+        let mut spec = dash_spec(1);
+        spec.source = StreamSource::Single("https://cdn/x/track.flac".into());
+        assert!(seek_spec(&spec, 100.0).is_none());
+    }
+
+    /// A DASH seek reopens the download, which takes a moment: the queued audio is from the wrong
+    /// place and the position reports would still describe it, so both are dropped right away.
+    #[test]
+    fn a_seek_silences_the_old_position_at_once() {
+        let port = PcmPort::new();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut active = Some(Active::Real(Arc::new(Ctl::default())));
+        handle(PlayerCmd::Seek(42.0), &mut active, &port, &tx);
+        assert_eq!(port.position_secs(), 42.0);
+        assert!(port.is_paused());
+        handle(PlayerCmd::Resume, &mut active, &port, &tx);
+        assert!(!port.is_paused());
+    }
+
+    #[test]
+    fn the_demo_player_confirms_a_seek() {
+        let port = PcmPort::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut active = Some(Active::Sim { pos: 0.0, dur: 100.0, paused: false });
+        handle(PlayerCmd::Seek(30.0), &mut active, &port, &tx);
+        match rx.try_recv() {
+            Ok(Evt::Seeked(t)) => assert_eq!(t, 30.0),
+            other => panic!("expected a confirmation, got {other:?}"),
+        }
+    }
+
+    /// Pressing right again while the previous seek is still opening must not be confirmed away.
+    #[test]
+    fn a_newer_seek_supersedes_the_one_being_opened() {
+        let ctl = Ctl::default();
+        assert!(!superseded(&ctl));
+        *ctl.seek.lock().unwrap() = Some(30.0);
+        assert!(superseded(&ctl));
+    }
+
+    /// The mute that covers a seek must not override a pause the user asked for.
+    #[test]
+    fn the_seek_mute_lifts_only_when_the_user_is_playing() {
+        let port = PcmPort::new();
+        let ctl = Ctl::default();
+        port.set_paused(true);
+        unmute_if_playing(&ctl, &port);
+        assert!(!port.is_paused());
+        port.set_paused(true);
+        ctl.paused_by_user.store(true, std::sync::atomic::Ordering::SeqCst);
+        unmute_if_playing(&ctl, &port);
+        assert!(port.is_paused());
+    }
 }

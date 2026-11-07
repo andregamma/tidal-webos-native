@@ -4,6 +4,7 @@ use crate::geom::{Color, Rect};
 use crate::i18n;
 use crate::images::Images;
 use crate::input::Key;
+use crate::quality::Quality;
 use crate::screens::{
     home::HomeScreen, liked::LikedScreen, login::LoginScreen, player::PlayerScreen,
     settings::SettingsScreen,
@@ -62,6 +63,9 @@ pub struct App {
     fade: Smooth,
     toast: Option<(String, f32)>,
     quit: bool,
+    /// Streaming quality the user asked for (Settings). The backend caps it by the account's
+    /// ceiling; `Max` (the default) means "the best available".
+    quality: Quality,
     /// Back presses before this time are ignored (key repeat / duplicate events).
     back_guard: f32,
 }
@@ -86,8 +90,10 @@ impl App {
             fade: Smooth::new(0.0).with_rate(10.0),
             toast: None,
             quit: false,
+            quality: Quality::default(),
             back_guard: 0.0,
         };
+        app.settings.set_quality(app.quality);
         match start {
             Start::Login => {
                 app.fade.snap(1.0);
@@ -111,6 +117,30 @@ impl App {
     /// Current language code (`pt-BR`).
     pub fn locale(&self) -> &str {
         &self.locale
+    }
+
+    /// Start with the saved audio quality. Only sets what is shown, like [`App::with_locale`]: the
+    /// backend reads the same saved value on its own, so no command is sent.
+    pub fn with_quality(mut self, quality: Quality) -> Self {
+        self.quality = quality;
+        self.settings.set_quality(quality);
+        self
+    }
+
+    /// Streaming quality the user chose (`Max` = best the account allows).
+    pub fn quality(&self) -> Quality {
+        self.quality
+    }
+
+    /// The user picked a quality: tell the backend (applies + persists it).
+    fn change_quality(&mut self, quality: Quality) {
+        if quality == self.quality {
+            return;
+        }
+        self.quality = quality;
+        self.settings.set_quality(quality);
+        self.send(Cmd::SetQuality(quality));
+        self.toast = Some((format!("Qualidade do áudio: {}", quality.label()), 3.0));
     }
 
     /// The user picked a language: tell the backend (applies + persists it) and refetch what the
@@ -215,10 +245,23 @@ impl App {
                     self.login.set_checking();
                     self.send(Cmd::StartLogin);
                 }
+                Evt::PkceLogin { qr_url, paste_url, expires_in } => {
+                    self.login.set_pkce(&qr_url, paste_url.as_deref(), expires_in, self.time)
+                }
+                Evt::FallbackOffered(reason) => self.login.set_offer(reason),
+                Evt::LoginCancelled => self.login.set_idle(),
                 Evt::LoginCode { user_code, verify_url, qr_url, expires_in } => {
                     self.login.set_code(user_code, verify_url, &qr_url, expires_in, self.time)
                 }
-                Evt::LoggedIn => self.enter_main(Route::Home),
+                Evt::LoggedIn { max_quality } => match max_quality {
+                    // The service says the account cannot stream HiRes (the fallback never does):
+                    // say so before dropping the user into the library.
+                    Some(q) if !is_hi_res(&q) => {
+                        self.goto(Route::Login);
+                        self.login.set_reduced_quality(q);
+                    }
+                    _ => self.enter_main(Route::Home),
+                },
                 Evt::LoginFailed(msg) => {
                     if self.route != Route::Login {
                         self.goto(Route::Login);
@@ -231,6 +274,7 @@ impl App {
                 Evt::Lyrics { track_id, lines, synced } => self.player.set_lyrics(track_id, lines, synced),
                 Evt::StreamInfo(i) => self.player.set_stream_info(i),
                 Evt::Position(s) => self.player.set_position(s),
+                Evt::Seeked(s) => self.player.on_seeked(s),
                 Evt::TrackEnded => self.player.on_ended(),
                 Evt::PlaybackError(m) => {
                     self.player.on_failed();
@@ -257,6 +301,9 @@ impl App {
             Route::Login => match self.login.on_key(k) {
                 Action::Back => self.quit = true,
                 Action::RetryLogin => self.send(Cmd::StartLogin),
+                Action::UseFallback => self.send(Cmd::StartLoginFallback),
+                Action::CancelLogin => self.send(Cmd::CancelLogin),
+                Action::Continue => self.enter_main(Route::Home),
                 _ => {}
             },
             Route::Player => {
@@ -273,6 +320,12 @@ impl App {
                     }
                     Action::Transport(c) => {
                         let _ = self.svc.player.send(c);
+                    }
+                    // Shortcut from the player: Settings, on the quality field.
+                    Action::OpenQuality => {
+                        self.goto(Route::Settings);
+                        self.focus = Focus::Content;
+                        self.settings.focus_quality();
                     }
                     _ => {}
                 }
@@ -303,9 +356,21 @@ impl App {
                         _ => self.liked.on_key(k),
                     };
                     match action {
-                        Action::None | Action::Back | Action::RetryLogin | Action::Transport(_) => {}
+                        Action::None
+                        | Action::Back
+                        | Action::RetryLogin
+                        | Action::UseFallback
+                        | Action::CancelLogin
+                        | Action::Continue
+                        | Action::Transport(_) => {}
                         Action::Toast(m) => self.toast = Some((m, 3.0)),
                         Action::SetLocale(code) => self.change_locale(code),
+                        Action::SetQuality(q) => self.change_quality(q),
+                        Action::OpenQuality => {
+                            self.goto(Route::Settings);
+                            self.focus = Focus::Content;
+                            self.settings.focus_quality();
+                        }
                         Action::FocusSidebar => self.focus = Focus::Sidebar,
                         Action::FocusBar => {
                             if self.has_track() {
@@ -413,6 +478,12 @@ impl App {
             ui::text_centered(out, m, r, 28.0, self.theme.text, &s);
         }
     }
+}
+
+/// `HI_RES_LOSSLESS` is the tier this app exists for: anything else is "not HiRes".
+fn is_hi_res(quality: &str) -> bool {
+    let q = quality.to_ascii_uppercase();
+    q.contains("HI_RES") || q.contains("HIRES")
 }
 
 #[cfg(test)]
@@ -663,6 +734,49 @@ mod tests {
         assert!(app.player.now_playing().unwrap().playing);
     }
 
+    // ---- audio quality ----------------------------------------------------------------
+
+    fn quality_app() -> (App, BackendSide) {
+        let (app_side, backend) = channel_pair();
+        let app = App::new(app_side, Theme::default(), Start::Settings);
+        (app, backend)
+    }
+
+    #[test]
+    fn the_settings_quality_select_sends_and_keeps_the_choice() {
+        let (mut app, be) = quality_app();
+        settle(&mut app);
+        let _ = be.rx.try_iter().count();
+
+        press(&mut app, Key::Ok); // open the list, on the current choice (Max)
+        press(&mut app, Key::Up); // Lossless
+        press(&mut app, Key::Ok);
+        assert!(be.rx.try_iter().any(|c| matches!(c, Cmd::SetQuality(q) if q == Quality::Lossless)));
+        assert_eq!(app.quality(), Quality::Lossless);
+
+        // Re-picking the same value sends nothing.
+        press(&mut app, Key::Ok);
+        press(&mut app, Key::Ok);
+        assert!(!be.rx.try_iter().any(|c| matches!(c, Cmd::SetQuality(_))));
+    }
+
+    #[test]
+    fn the_player_quality_key_opens_settings_on_the_quality_field() {
+        let (mut app, be, _p) = home_app(&[1]);
+        press(&mut app, Key::Ok); // play, go to the player
+        assert_eq!(app.route(), Route::Player);
+
+        press(&mut app, Key::Quality);
+        assert_eq!(app.route(), Route::Settings);
+
+        // The focus is on the quality field: OK opens its list and Up + OK picks Lossless.
+        let _ = be.rx.try_iter().count();
+        press(&mut app, Key::Ok);
+        press(&mut app, Key::Up);
+        press(&mut app, Key::Ok);
+        assert!(be.rx.try_iter().any(|c| matches!(c, Cmd::SetQuality(q) if q == Quality::Lossless)));
+    }
+
     #[test]
     fn selecting_a_finished_track_again_reloads_it() {
         let (mut app, be, _p) = home_app(&[1]);
@@ -673,5 +787,93 @@ mod tests {
         let _ = be.rx.try_iter().count();
         press(&mut app, Key::Ok);
         assert!(be.rx.try_iter().any(|c| matches!(c, Cmd::Play { track_id: 1, .. })));
+    }
+    // ---- sign-in: PKCE first, device-code fallback ---------------------------------------
+
+    /// A login screen that already asked the backend for a sign-in (`Start::Login` sends `Boot`).
+    fn login_app() -> (App, BackendSide) {
+        let (app_side, backend) = channel_pair();
+        let app = App::new(app_side, Theme::default(), Start::Login);
+        (app, backend)
+    }
+
+    fn pkce_event() -> Evt {
+        Evt::PkceLogin {
+            qr_url: "https://login.tidal.com/authorize?client_id=x&state=y".into(),
+            paste_url: Some("https://tidal-relay.andregama.dev/paste/abc".into()),
+            expires_in: 180,
+        }
+    }
+
+    #[test]
+    fn the_pkce_screen_walks_through_both_qr_codes_and_back_cancels_it() {
+        let (mut app, be) = login_app();
+        settle(&mut app);
+        assert!(be.rx.try_iter().any(|c| matches!(c, Cmd::Boot)));
+
+        be.tx.send(pkce_event()).unwrap();
+        settle(&mut app);
+        let shown = texts(&app);
+        assert!(shown.iter().any(|s| s.contains("Scan the left code")));
+        assert!(shown.iter().any(|s| s.contains("paste it there")));
+        // No address on screen: a hand-off id is not something anyone types on a remote.
+        assert!(!shown.iter().any(|s| s.contains("tidal-relay")), "{shown:?}");
+
+        // Back on this screen hangs up the phone link instead of quitting the app.
+        press(&mut app, Key::Back);
+        assert!(!app.should_quit());
+        assert!(be.rx.try_iter().any(|c| matches!(c, Cmd::CancelLogin)));
+
+        // The backend confirms; OK starts a fresh attempt.
+        be.tx.send(Evt::LoginCancelled).unwrap();
+        press(&mut app, Key::Ok);
+        assert!(be.rx.try_iter().any(|c| matches!(c, Cmd::StartLogin)));
+    }
+
+    #[test]
+    fn a_failed_pkce_offers_the_device_code_fallback() {
+        let (mut app, be) = login_app();
+        settle(&mut app);
+        let _ = be.rx.try_iter().count();
+
+        be.tx.send(Evt::FallbackOffered("No phone opened the link in time.".into())).unwrap();
+        settle(&mut app);
+        assert!(texts(&app).iter().any(|s| s.contains("Could not finish signing in")));
+
+        press(&mut app, Key::Right); // focus "Use the common QR code"
+        press(&mut app, Key::Ok);
+        assert!(be.rx.try_iter().any(|c| matches!(c, Cmd::StartLoginFallback)));
+    }
+
+    #[test]
+    fn a_reduced_quality_sign_in_warns_before_the_library() {
+        let (mut app, be) = login_app();
+        settle(&mut app);
+
+        be.tx.send(Evt::LoggedIn { max_quality: Some("LOSSLESS".into()) }).unwrap();
+        settle(&mut app);
+        assert_eq!(app.route(), Route::Login);
+        assert!(texts(&app).iter().any(|s| s.contains("Lossless CD")));
+
+        press(&mut app, Key::Ok); // "Continue anyway"
+        assert_eq!(app.route(), Route::Home);
+    }
+
+    #[test]
+    fn a_hires_sign_in_goes_straight_to_the_library() {
+        let (mut app, be) = login_app();
+        settle(&mut app);
+        be.tx.send(Evt::LoggedIn { max_quality: Some("HI_RES_LOSSLESS".into()) }).unwrap();
+        settle(&mut app);
+        assert_eq!(app.route(), Route::Home);
+    }
+
+    #[test]
+    fn an_unknown_quality_does_not_block_the_library() {
+        let (mut app, be) = login_app();
+        settle(&mut app);
+        be.tx.send(Evt::LoggedIn { max_quality: None }).unwrap();
+        settle(&mut app);
+        assert_eq!(app.route(), Route::Home);
     }
 }

@@ -1,15 +1,17 @@
 //! The app's persistent settings ("storage").
 //!
-//! Today that is only the language. It lives in `tide-settings.json`, next to the saved session and
+//! Today that is the language and the streaming quality. It lives in `tide-settings.json`, next to the saved session and
 //! with the same redundancy on the TV (see [`paths::storage_files`]): read from the first copy that
 //! parses, written atomically (temp file, fsync, rename) to every location that accepts it.
 //!
-//! Deliberately separate from the session: signing out deletes the session but keeps the language.
-//! Both backends call [`save_locale`] on `Cmd::SetLocale`, and `tide-sdl` calls [`Settings::load`] at
-//! start so `tide-core` (which does no I/O) is handed the value instead of reading it.
+//! Deliberately separate from the session: signing out deletes the session but keeps the settings.
+//! Both backends call [`save_locale`]/[`save_quality`] on `Cmd::SetLocale`/`Cmd::SetQuality`, and
+//! `tide-sdl` calls [`Settings::load`] at start so `tide-core` (which does no I/O) is handed the value
+//! instead of reading it.
 
 use crate::{diag, paths};
 use serde::{Deserialize, Serialize};
+use tide_core::quality::Quality;
 use std::{
     fs,
     io::{self, Write},
@@ -22,11 +24,17 @@ use tide_core::i18n;
 pub struct Settings {
     /// Always a code from `i18n::LANGUAGES` (`pt-BR`).
     pub locale: String,
+    /// One of `tide_core::quality::Quality::id` (`low`|`high`|`lossless`|`max`). `max` means
+    /// "the best the account can stream", which is the behaviour the app had before it was a choice.
+    pub audio_quality: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { locale: i18n::DEFAULT_LOCALE.to_string() }
+        Self {
+            locale: i18n::DEFAULT_LOCALE.to_string(),
+            audio_quality: Quality::default().id().to_string(),
+        }
     }
 }
 
@@ -65,11 +73,20 @@ pub fn save_locale(code: &str) -> usize {
     s.save()
 }
 
+/// Persist a new streaming quality, keeping whatever else is stored. Returns how many copies were
+/// written.
+pub fn save_quality(id: &str) -> usize {
+    let mut s = Settings::load();
+    s.audio_quality = Quality::parse(id).unwrap_or_default().id().to_string();
+    s.save()
+}
+
 fn read(path: &Path) -> Option<Settings> {
     let text = fs::read_to_string(path).ok()?;
     let mut s: Settings = serde_json::from_str(&text).ok()?;
-    // Whatever the file says, only a known language gets through.
+    // Whatever the file says, only known values get through.
     s.locale = i18n::resolve(&s.locale).to_string();
+    s.audio_quality = Quality::parse(&s.audio_quality).unwrap_or_default().id().to_string();
     Some(s)
 }
 
