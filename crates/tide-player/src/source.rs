@@ -113,7 +113,6 @@ impl ProgressiveSource {
                     StreamSource::Segmented { init, template, start_number, segment_secs } => {
                         download_segments(&init, &template, start_number, segment_secs, duration, &s2)
                     }
-                    StreamSource::Simulated => Err("simulated streams have no data".into()),
                 };
                 let (m, cv) = &*s2;
                 let mut g = m.lock().unwrap_or_else(|e| e.into_inner());

@@ -1,12 +1,15 @@
-# Proof of concept: backend on `tidlers`
+# Backend on `tidlers`
 
-Run (needs `TIDAL_CLIENT_ID`/`TIDAL_CLIENT_SECRET` for the PKCE flow, see `docs/auth.md`):
+The `tidlers` crate is the **only** backend: every build and every platform runs it. The mock
+backend and the hand-written `real` module were removed, and there is no cargo feature or
+`--backend` switch to disable it.
+
+Run (`TIDAL_CLIENT_ID`/`TIDAL_CLIENT_SECRET` are optional, see `docs/auth.md`):
 ```
-make sim-tidlers
-# = cargo run --release -p tide-sdl --features tidlers -- --screen=login --backend=tidlers
+make sim
+# = cargo run --release -p tide-sdl   (boots, then Home or sign-in)
 ```
 Code: `crates/tide-api/src/tidlers_backend/` (`mod.rs` adapter, `map.rs` pure mappings).
-The hand-written `real` backend was removed once this one worked; only `mock` and `tidlers` remain.
 
 ## What the adapter does
 | Cmd | Implementation |
@@ -66,16 +69,15 @@ gained `synced`, `Action::Toast`, and the player has an unsynced lyrics mode.
 ## Verification status
 | | Status |
 |---|---|
-| Builds with `--features tidlers` | yes (native x86_64) |
+| Builds (native x86_64) | yes |
 | Unit tests (LRC parsing, Track mapping, rejection classification, session file, **PKCE server**: state, 404/405, `/auth`, one-shot, timeout, request cap) | 31 pass |
 | PKCE sign-in against the real service | **never run**; depends on the service accepting the LAN `redirect_uri` (else the fallback is used) |
 | Home mapping | **not unit-tested** (needs huge fixtures); compiled only |
 | Login / refresh / favourites / lyrics against the real service | **never run** |
 | Cross-compile for webOS | **not tried** |
 
-## Decision checklist (to choose between `real` and `tidlers`)
-1. Does the first real login work with your credentials? (`make sim-tidlers`)
-2. Do Liked songs and Lyrics load? Does Home deserialize? (toasts tell you)
-3. Does the crate cross-compile with the NDK (aws-lc)? If not: fork with another TLS backend,
-   or keep `real` for auth and use `tidlers` models only.
-4. If all pass: delete `crates/tide-api/src/real/{auth,http,store}.rs` (about 450 lines + tests).
+## Next steps
+1. Confirm the first real login works with your credentials (`make sim`).
+2. Confirm Liked songs and Lyrics load and Home deserializes (toasts tell you).
+3. Confirm the crate cross-compiles with the NDK (aws-lc, `docs/webos.md`). If it does not, fork it
+   with another TLS backend rather than reintroducing a local-only backend.

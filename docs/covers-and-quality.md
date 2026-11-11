@@ -23,7 +23,6 @@ Unverified: that the image CDN serves 160/320/640 for every cover; check `image 
   hardware format afterwards; the app cannot see that. To see the real hardware format on the TV, over ssh during
   playback: `cat /proc/asound/card*/pcm*p/sub*/hw_params` (path not verified on webOS).
 * Lossy codecs show no bit depth (none exists) and no bitrate (not measured yet).
-* The mock backend sends fake details so the layout can be seen in the simulator.
 
 ## Also included in this drop (earlier requests)
 Session persistence fixes (`paths.rs`, `diag.rs`, `tidlers_backend::boot/save`, TV data dir `/media/developer/tide-tv`),

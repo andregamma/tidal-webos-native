@@ -13,7 +13,7 @@
                   (no GL,   │  Focus · Smooth anims · DrawList          │
                    no I/O)  └───────────────────────────────────────────┼──────────────┐
                                                                          │ tide-api    │
-                                                              backend thread (mock → real)
+                                                              backend thread (tidlers)
 ```
 
 ## 1. Crates
@@ -21,7 +21,7 @@
 |---|---|---|
 | `tide-core` | state, navigation/focus, layout, animation, theme; emits `DrawList` | nothing external |
 | `tide-gfx` | GLES2 renderer: SDF rounded rects, glyph atlas, scissor clips | `glow`, `fontdue` |
-| `tide-api` | backend thread implementing `Cmd → Evt` (mock today) | `tide-core` types |
+| `tide-api` | backend thread implementing `Cmd → Evt` on the `tidlers` crate | `tide-core` types |
 | `tide-sdl` | window, GL context, input mapping, main loop, screenshots, theme hot-reload | SDL2 |
 
 Rule: dependencies point inward. The TV build swaps only `tide-sdl`'s window/input bits.
@@ -76,18 +76,16 @@ LoginFailed, Home, Liked, Account, Lyrics, Error}`.
 `tide-api::tidlers_backend` adapts the `tidlers` crate (async, own tokio runtime) to this protocol.
 
 `services.rs` defines `Cmd` (UI → backend) and `Evt` (backend → UI). The UI
-never blocks and never sees HTTP. The real backend is `tide-api::tidlers_backend::run(BackendSide)`
-with the same contract (device-code login, token refresh/storage, home, favourites,
-lyrics), and choose mock vs real in `tide-sdl` (e.g. `--backend=mock`).
-
-Alternative backend (POC, cargo feature `tidlers`): `tide-api::tidlers_backend` adapts the
-`tidlers` crate to the same protocol; see `docs/tidlers-poc.md` for findings and status.
+never blocks and never sees HTTP. The only backend is `tide-api::tidlers_backend::run(BackendSide)`
+with the same contract (sign-in, token refresh/storage, home, favourites, lyrics, playback URLs);
+`tide-sdl` always starts it and there is no mock or fallback backend. See `docs/tidlers-poc.md`
+for findings and status.
 
 Settings & language: the Settings page (`screens/settings.rs`, with the reusable `widgets/select.rs`) shows the
 account (`Evt::Account`: name, e-mail, plan), an **audio quality** select (`tide_core::quality::Quality`:
 Low/High/Lossless/Max, Max = HiRes) and a language select fed by `tide_core::i18n::LANGUAGES` (codes like
 `pt-BR`). Up/Down move between the two fields; OK opens a list. Picking a language sends `Cmd::SetLocale`, picking
-a quality `Cmd::SetQuality`; the real backend stores both, applies them to the live client and every later one
+a quality `Cmd::SetQuality`; the backend stores both, applies them to the live client and every later one
 (`new_client`), and persists them through `tide_api::settings` (`tide-settings.json`, same multi-location storage as
 the session, kept across logout). `tide-sdl` loads them at start and gives them to `App::with_locale` /
 `App::with_quality`; `App::locale()` is the key for the app's own i18n texts. The quality is a *ceiling request*:

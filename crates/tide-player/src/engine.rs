@@ -36,19 +36,13 @@ struct Ctl {
     seekable: AtomicBool,
 }
 
-enum Active {
-    /// No audio: a fake clock for the mock backend.
-    Sim { pos: f32, dur: f32, paused: bool },
-    Real(Arc<Ctl>),
-}
-
 /// Start the player thread. `port` is shared with the platform audio layer.
 pub fn spawn(side: PlayerSide, port: PcmPort) {
     thread::Builder::new().name("player".into()).spawn(move || run(side, port)).expect("spawn player thread");
 }
 
 fn run(side: PlayerSide, port: PcmPort) {
-    let mut active: Option<Active> = None;
+    let mut active: Option<Arc<Ctl>> = None;
     let mut last = Instant::now();
     loop {
         match side.rx.recv_timeout(Duration::from_millis(100)) {
@@ -60,15 +54,14 @@ fn run(side: PlayerSide, port: PcmPort) {
             }
         }
         if last.elapsed() >= REPORT_EVERY {
-            let dt = last.elapsed().as_secs_f32();
             last = Instant::now();
-            tick(dt, &mut active, &port, &side.tx);
+            tick(&mut active, &port, &side.tx);
         }
     }
 }
 
-fn stop_active(active: &mut Option<Active>) {
-    if let Some(Active::Real(ctl)) = active.take() {
+fn stop_active(active: &mut Option<Arc<Ctl>>) {
+    if let Some(ctl) = active.take() {
         ctl.stop.store(true, Ordering::SeqCst);
     }
 }
@@ -86,53 +79,26 @@ fn superseded(ctl: &Ctl) -> bool {
     ctl.seek.lock().unwrap_or_else(|e| e.into_inner()).is_some()
 }
 
-fn handle(cmd: PlayerCmd, active: &mut Option<Active>, port: &PcmPort, tx: &Sender<Evt>) {
+fn handle(cmd: PlayerCmd, active: &mut Option<Arc<Ctl>>, port: &PcmPort, tx: &Sender<Evt>) {
     match cmd {
         PlayerCmd::Load(spec) => {
             stop_active(active);
             port.flush(0.0);
             port.set_paused(false);
-            *active = Some(match spec.source {
-                StreamSource::Simulated => {
-                    // Fake details so the quality indicator can be seen without real audio.
-                    let _ = tx.send(Evt::StreamInfo(StreamInfo {
-                        codec: "FLAC".into(),
-                        src_rate: 44_100,
-                        src_bits: Some(16),
-                        src_channels: 2,
-                        dev_rate: 44_100,
-                        dev_channels: 2,
-                        driver: "simulated".into(),
-                        tier: Some("LOSSLESS".into()),
-                    }));
-                    Active::Sim { pos: 0.0, dur: spec.duration, paused: false }
-                }
-                _ => {
-                    let ctl = Arc::new(Ctl::default());
-                    let (c, p, t) = (ctl.clone(), port.clone(), tx.clone());
-                    thread::Builder::new().name("decode".into()).spawn(move || session(spec, c, p, t)).ok();
-                    Active::Real(ctl)
-                }
-            });
+            let ctl = Arc::new(Ctl::default());
+            let (c, p, t) = (ctl.clone(), port.clone(), tx.clone());
+            thread::Builder::new().name("decode".into()).spawn(move || session(spec, c, p, t)).ok();
+            *active = Some(ctl);
         }
         PlayerCmd::Pause | PlayerCmd::Resume => {
             let pause = matches!(cmd, PlayerCmd::Pause);
-            match active {
-                Some(Active::Sim { paused, .. }) => *paused = pause,
-                Some(Active::Real(ctl)) => {
-                    ctl.paused_by_user.store(pause, Ordering::SeqCst);
-                    port.set_paused(pause);
-                }
-                None => {}
+            if let Some(ctl) = active {
+                ctl.paused_by_user.store(pause, Ordering::SeqCst);
+                port.set_paused(pause);
             }
         }
-        PlayerCmd::Seek(s) => match active {
-            Some(Active::Sim { pos, dur, .. }) => {
-                *pos = s.clamp(0.0, *dur);
-                // The demo has no audio to open: the seek is done as soon as it is asked for.
-                let _ = tx.send(Evt::Seeked(*pos));
-            }
-            Some(Active::Real(ctl)) => {
+        PlayerCmd::Seek(s) => {
+            if let Some(ctl) = active {
                 let t = s.max(0.0) as f64;
                 *ctl.seek.lock().unwrap_or_else(|e| e.into_inner()) = Some(t);
                 if !ctl.seekable.load(Ordering::SeqCst) {
@@ -143,8 +109,7 @@ fn handle(cmd: PlayerCmd, active: &mut Option<Active>, port: &PcmPort, tx: &Send
                     port.set_paused(true);
                 }
             }
-            None => {}
-        },
+        }
         PlayerCmd::Stop => {
             stop_active(active);
             port.flush(0.0);
@@ -153,21 +118,9 @@ fn handle(cmd: PlayerCmd, active: &mut Option<Active>, port: &PcmPort, tx: &Send
     }
 }
 
-fn tick(dt: f32, active: &mut Option<Active>, port: &PcmPort, tx: &Sender<Evt>) {
+fn tick(active: &mut Option<Arc<Ctl>>, port: &PcmPort, tx: &Sender<Evt>) {
     let ended = match active {
-        Some(Active::Sim { pos, dur, paused }) => {
-            if !*paused {
-                *pos += dt;
-            }
-            if *pos >= *dur {
-                let _ = tx.send(Evt::TrackEnded);
-                true
-            } else {
-                let _ = tx.send(Evt::Position(*pos));
-                false
-            }
-        }
-        Some(Active::Real(ctl)) => {
+        Some(ctl) => {
             if ctl.done.load(Ordering::SeqCst) {
                 true
             } else {
@@ -438,24 +391,12 @@ mod tests {
     fn a_seek_silences_the_old_position_at_once() {
         let port = PcmPort::new();
         let (tx, _rx) = std::sync::mpsc::channel();
-        let mut active = Some(Active::Real(Arc::new(Ctl::default())));
+        let mut active = Some(Arc::new(Ctl::default()));
         handle(PlayerCmd::Seek(42.0), &mut active, &port, &tx);
         assert_eq!(port.position_secs(), 42.0);
         assert!(port.is_paused());
         handle(PlayerCmd::Resume, &mut active, &port, &tx);
         assert!(!port.is_paused());
-    }
-
-    #[test]
-    fn the_demo_player_confirms_a_seek() {
-        let port = PcmPort::new();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let mut active = Some(Active::Sim { pos: 0.0, dur: 100.0, paused: false });
-        handle(PlayerCmd::Seek(30.0), &mut active, &port, &tx);
-        match rx.try_recv() {
-            Ok(Evt::Seeked(t)) => assert_eq!(t, 30.0),
-            other => panic!("expected a confirmation, got {other:?}"),
-        }
     }
 
     /// Pressing right again while the previous seek is still opening must not be confirmed away.

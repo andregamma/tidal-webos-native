@@ -1,8 +1,8 @@
 //! The only seam between UI and the outside world.
 //!
 //! The UI thread never blocks: it sends [`Cmd`]s and drains [`Evt`]s once per
-//! frame. A backend thread (mock today, real Tidal client in M1/M2) does the
-//! slow work. Swapping the backend never touches the UI.
+//! frame. A backend thread (`tide-api`, on the `tidlers` crate) does the slow
+//! work. The UI never talks to the service itself.
 
 use crate::model::{Account, LyricLine, Shelf, Track};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -10,8 +10,6 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 /// Where the audio bytes come from. Produced by a backend, consumed by the player.
 #[derive(Clone, Debug)]
 pub enum StreamSource {
-    /// Demo/mock: no audio at all, the player only simulates a clock.
-    Simulated,
     /// One file/URL (e.g. FLAC or M4A).
     Single(String),
     /// Initialization segment + numbered media segments (DASH).

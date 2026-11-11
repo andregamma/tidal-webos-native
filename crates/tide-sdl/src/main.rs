@@ -44,9 +44,8 @@ struct Opts {
     frames: Option<u32>,
     keys: Vec<Key>,
     theme: PathBuf,
-    hud: bool,
-    vsync: bool,
-    backend: String,
+    hud: bool,    vsync: bool,
+
     /// Debug: play this URL directly, without any service (e.g. a local FLAC over http).
     play_url: Option<String>,
     mime: String,
@@ -63,10 +62,6 @@ fn parse_args() -> Opts {
         theme: PathBuf::from("assets/theme.json"),
         hud: false,
         vsync: true,
-        backend: std::env::var("TIDE_BACKEND").unwrap_or_else(|_| {
-            // The TV build has no command line: use the real backend when it is compiled in.
-            if cfg!(all(target_arch = "arm", feature = "tidlers")) { "tidlers".into() } else { "mock".into() }
-        }),
         play_url: None,
         mime: String::new(),
         duration: 600.0,
@@ -93,13 +88,12 @@ fn parse_args() -> Opts {
             "--theme" => o.theme = PathBuf::from(v),
             "--hud" => o.hud = true,
             "--no-vsync" => o.vsync = false,
-            "--backend" => o.backend = v.to_string(),
             "--play-url" => o.play_url = Some(v.to_string()),
             "--mime" => o.mime = v.to_string(),
             "--duration" => o.duration = v.parse().unwrap_or(600.0),
             "--help" | "-h" => {
                 println!(
-                    "tide-tv [--screen=login|home|liked|settings] [--size=WxH] [--backend=mock|tidlers] [--play-url=URL --mime=audio/flac] [--theme=path] [--hud] [--no-vsync]\n        \
+                    "tide-tv [--screen=login|home|liked|settings] [--size=WxH] [--play-url=URL --mime=audio/flac] [--theme=path] [--hud] [--no-vsync]\n        \
                      [--screenshot=out.png [--frames=N] [--keys=down,right,ok,...]]"
                 );
                 std::process::exit(0);
@@ -216,13 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port = tide_player::PcmPort::new();
     tide_player::spawn(ch.player, port.clone());
     let mut audio = audio::AudioOut::new(&sdl, port);
-    match opts.backend.as_str() {
-        #[cfg(feature = "tidlers")]
-        "tidlers" => tide_api::spawn_tidlers(ch.backend),
-        #[cfg(not(feature = "tidlers"))]
-        "tidlers" => return Err("rebuild with `--features tidlers` to use this backend".into()),
-        _ => tide_api::spawn_mock(ch.backend),
-    }
+    tide_api::spawn(ch.backend);
     if let Some(url) = &opts.play_url {
         let _ = player_tx.send(PlayerCmd::Load(StreamSpec {
             track_id: 0,
@@ -244,7 +232,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut last, mut fps_t, mut fps_n, mut fps) = (Instant::now(), Instant::now(), 0u32, 0.0f32);
     let mut frame = 0u32;
     let mut theme_poll = 0.0f32;
-    let key_start = 40u32; // frames to wait for mock data before scripted keys
+    let key_start = 40u32; // frames to wait for the first responses before scripted keys
     let total_frames = opts.frames.unwrap_or(key_start + opts.keys.len() as u32 * 10 + 70);
 
     'main: loop {
@@ -347,7 +335,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("saved {} ({}x{}, {} draw calls)", path.display(), w, h, renderer.draw_calls);
                 break;
             }
-            thread::sleep(Duration::from_millis(16)); // keep real time for the mock backend
+            thread::sleep(Duration::from_millis(16)); // keep real time for the backend
         }
         window.gl_swap_window();
 

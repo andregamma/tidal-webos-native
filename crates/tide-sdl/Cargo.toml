@@ -7,9 +7,6 @@ edition.workspace = true
 name = "tide-tv"
 path = "src/main.rs"
 
-[features]
-tidlers = ["tide-api/tidlers"]
-
 [dependencies]
 tide-core = { path = "../tide-core" }
 tide-gfx = { path = "../tide-gfx" }

@@ -20,7 +20,7 @@ libraries; the desktop SDL build is the primary development target and the webOS
 | `crates/tide-gfx` | GLES2 renderer (SDF rects, glyph atlas, scissor clips). |
 | `crates/tide-img` | image decoding. |
 | `crates/tide-player` | audio decode + PCM queue. |
-| `crates/tide-api` | backend thread implementing `Cmd -> Evt` (mock and real/tidlers). |
+| `crates/tide-api` | backend thread implementing `Cmd -> Evt` on the `tidlers` crate. |
 | `crates/tide-sdl` | window, GL context, input mapping, main loop, screenshots, theme reload — the only SDL-aware crate. |
 | `crates/tide-relay` | Cloudflare Worker PKCE relay. **Excluded from the workspace**, has its own manifest. |
 | `assets/` | theme JSON, fonts. `docs/` design notes. `ci/`, `packaging/` webOS build + ipk. |
@@ -28,10 +28,9 @@ libraries; the desktop SDL build is the primary development target and the webOS
 ## Commands
 
 ```bash
-make sim          # simulator, Home, F3 = fps HUD
-make sim-login    # start at the login flow
+make sim          # simulator; restores the saved session or signs in, F3 = fps HUD
 make check        # cargo test --workspace + cargo clippy --workspace --all-targets
-make shots        # headless screenshots into ./shots (needs xvfb + Mesa llvmpipe)
+make shots        # headless screenshot of the empty layout (needs xvfb + Mesa llvmpipe)
 make relay-test   # relay unit tests (host)
 make relay-check  # relay type-check for wasm32-unknown-unknown
 ```
@@ -39,8 +38,9 @@ make relay-check  # relay type-check for wasm32-unknown-unknown
 * Host deps: `libsdl2-dev`, `libgles2-mesa-dev`, Rust >= 1.88.
 * Headless visual check without `make shots`:
   `cargo run -p tide-sdl -- --screen=home --keys=down,right,ok --screenshot=out.png`
+  (`--screen=` skips the boot, so the screen is the empty layout, not live content)
 * Useful flags: `--screen=`, `--keys=`, `--screenshot=`, `--size=3840x2160`,
-  `--hud`, `--no-vsync`, `--backend=tidlers` (with `--features tidlers`).
+  `--hud`, `--no-vsync`, `--play-url=` (play a URL directly).
 * There is no formatter/rustfmt config; match the surrounding style (4 spaces,
   ~100 columns, doc comments in English).
 
@@ -67,9 +67,10 @@ make relay-check  # relay type-check for wasm32-unknown-unknown
 
 ## Protocol and backend changes
 
-* Changing `Cmd`/`Evt` means updating **both** implementations: the mock
-  (`tide-api/src/mock.rs`) and the real/tidlers backend
-  (`tide-api/src/tidlers_backend/`), plus every `match` in `tide-sdl`/`App`.
+* Changing `Cmd`/`Evt` means updating the backend
+  (`tide-api/src/tidlers_backend/`) and every `match` in `tide-sdl`/`App`.
+* `tidlers` is the only backend: there is no mock mode, no `tidlers` cargo
+  feature to enable and no `TIDE_BACKEND` / `--backend` switch. Keep it that way.
 * Settings (audio quality, locale) are persisted by `tide_api::settings` into
   `tide-settings.json` and survive logout; quality is a ceiling request capped by
   the account's `highestSoundQuality`, and `TIDAL_QUALITY` overrides both.
@@ -85,8 +86,7 @@ make relay-check  # relay type-check for wasm32-unknown-unknown
   targets when credentials matter.
 * Never commit `.env`, `tidlers-session.json`, `tide-settings.json`, tokens, or
   logs. Never print secret values into code, tests, docs or logs.
-* CI builds two matrix entries (`""` and `tidlers`) and the tidlers one may fail
-  on TLS/C deps; keep the basic build green.
+* CI has a single webOS build; it may fail on TLS/C deps (`aws-lc`).
 
 ## Testing and honesty about status
 

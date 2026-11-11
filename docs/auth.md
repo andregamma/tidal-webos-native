@@ -77,14 +77,14 @@ a mismatch) but never the secret.
 # either in .env at the repo root (what the Makefile loads), or exported in the shell
 export TIDAL_CLIENT_ID="your-client-id"
 export TIDAL_CLIENT_SECRET="your-client-secret"
-make sim-tidlers
+make sim
 ```
 
 Where they live, by target:
 
 * **Simulator:** `.env` at the repo root (git-ignored). The `Makefile` does `-include .env` and exports
-  exactly `TIDAL_CLIENT_ID`, `TIDAL_CLIENT_SECRET`, `TIDAL_QUALITY`, `TIDE_RELAY_BASE`, `TIDE_DATA_DIR`
-  and `TIDE_BACKEND` to every recipe, so the file is enough — no `export` in the terminal. Plain
+  exactly `TIDAL_CLIENT_ID`, `TIDAL_CLIENT_SECRET`, `TIDAL_QUALITY`, `TIDE_RELAY_BASE` and
+  `TIDE_DATA_DIR` to every recipe, so the file is enough — no `export` in the terminal. Plain
   `KEY=value` lines, **no quotes** (make would keep them as part of the value).
 * **A bare `cargo run`/`cargo test`** does not read `.env`: export the variables in that shell
   (`set -a; . ./.env; set +a` in bash) or use `make`.

@@ -23,7 +23,6 @@ UI ──PlayerCmd::{Pause,Resume,Seek,Stop}────────────
   or on the first play of a restored session. The default is `Max`, i.e. the best the account can stream.
   `TIDAL_QUALITY=low|high|lossless|hires` overrides both, for comparing streams while debugging.
   The player's `Q` key (green button on the remote) opens Settings on this field.
-* The mock backend uses `StreamSource::Simulated` (silent fake clock), so the UI keeps working without a service.
 
 ## Protected streams are not played
 The service can mark a stream as encrypted (`encryptionType` other than `NONE`). The reference

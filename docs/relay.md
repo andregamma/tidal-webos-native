@@ -116,7 +116,7 @@ make relay-check    # cargo check --target wasm32-unknown-unknown (needs rustup 
 cd crates/tide-relay && npx wrangler@latest dev   # local Worker + Durable Object on :8787
 ```
 
-With a local Worker, point the app at it: `TIDE_RELAY_BASE=http://127.0.0.1:8787 make sim-tidlers`.
+With a local Worker, point the app at it: `TIDE_RELAY_BASE=http://127.0.0.1:8787 make sim`.
 
 `protocol.rs` holds every decision as a pure function (what a body may say, what a pasted address must
 carry, what a poll answers, when a record dies), which is where the 20 tests are; `api.rs` is the routing

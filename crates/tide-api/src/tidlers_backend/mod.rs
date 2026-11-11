@@ -1,4 +1,4 @@
-//! The real backend, built on the `tidlers` crate (feature `tidlers`).
+//! The backend, built on the `tidlers` crate.
 //!
 //! * Credentials: the PKCE flow signs in with the client named by `TIDAL_CLIENT_ID` /
 //!   `TIDAL_CLIENT_SECRET`, because the authorization code belongs to that client and every refresh

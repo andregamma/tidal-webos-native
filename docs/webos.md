@@ -19,12 +19,12 @@ cross-compiles and links for `armv7-unknown-linux-gnueabi` (see "Build status").
 
 ## Get an .ipk
 **GitHub Actions** (works from Windows): push the repo, open *Actions -> webOS build -> Run workflow*,
-download the `tide-tv-basic-ipk` / `tide-tv-tidlers-ipk` artifacts. `basic` = mock backend only;
-`tidlers` = the real Tidal backend (the TLS/C dependencies are the risky part; it may fail independently).
+download the `tide-tv-ipk` artifact. It contains the real Tidal backend (`tidlers`); the TLS/C
+dependencies (`aws-lc`) are the risky part of the cross-build.
 **Locally** (Linux x86_64 or arm64 with cmake, ninja, python3, Rust + the `armv7-unknown-linux-gnueabi` target):
 ```
 ci/setup-ndk.sh                       # once
-FEATURES=tidlers ci/webos-build.sh    # -> dist/tide-tv_tidlers.ipk
+ci/webos-build.sh                     # -> dist/tide-tv.ipk
 # without rustup's prebuilt std: BUILD_STD=1 (nightly features via RUSTC_BOOTSTRAP, needs rust-src)
 ```
 
@@ -35,7 +35,7 @@ FEATURES=tidlers ci/webos-build.sh    # -> dist/tide-tv_tidlers.ipk
    ```
    ares-setup-device --add tv -i "host=<TV IP>" -i "port=9922" -i "username=prisoner"
    ares-novacom --device tv --getkey        # passphrase shown in the Developer Mode app
-   ares-install --device tv dist/tide-tv_tidlers.ipk
+   ares-install --device tv dist/tide-tv.ipk
    ares-launch  --device tv dev.tidetv.app
    ```
    (or the webOS Dev Manager / VS Code extension: same steps in a GUI.)
@@ -49,22 +49,21 @@ FEATURES=tidlers ci/webos-build.sh    # -> dist/tide-tv_tidlers.ipk
   `ares-pull --device tv /media/developer/tide-tv/tide.log .`. It records the SDL video/audio driver chosen,
   panics and errors.
 * **Credentials**: nothing to configure; sign-in uses the `tidlers` library's defaults (`docs/auth.md`).
-* Backend defaults to `tidlers` on the `tidlers` build (override with `TIDE_BACKEND=mock|tidlers`), `mock` otherwise (the basic build has no real backend).
+* The backend is always `tidlers`; there is no backend switch.
 
 ## Things most likely to go wrong (in order)
 1. **Black screen / immediate exit**: the log shows why (SDL video init, GLES context, missing lib). GLES 2.0 is requested.
 2. **Keys**: OK/arrows should work as standard keys; Back needs the raw watch (`remote.rs`).
 3. **No sound**: look for `audio: using driver ...` in the log; set `SDL_AUDIODRIVER` if SDL picked the wrong one.
 4. **Out of memory** on long lossless tracks (the stream is held in RAM; `requiredMemory` in appinfo is a guess).
-5. **tidlers build**: `aws-lc` or glibc-2.12 symbol problems (more shims like `getauxval` may be needed), or
-   runtime TLS/certificate paths on the TV.
+5. **`tidlers` / TLS**: `aws-lc` or glibc-2.12 symbol problems (more shims like `getauxval` may be needed),
+   or runtime TLS/certificate paths on the TV.
 
 ## Build status (verified in the build sandbox, x86_64 Linux, Rust 1.91 + `-Z build-std`)
 | | Result |
 |---|---|
 | SDL-webOS (NDK, `WEBOS=ON`, `BROKEN_ABI=OFF`) | builds; 1.3 MB stripped; audio drivers alsa + pulseaudio, video wayland |
-| `tide-tv` basic (mock backend) for `armv7-unknown-linux-gnueabi` | links; ELF ARM, needs only glibc symbols up to 2.12 |
-| `tide-tv` with `tidlers` (reqwest + rustls + aws-lc) | links; needs glibc symbols up to 2.12; 10 MB (4.3 MB ipk) |
+| `tide-tv` (reqwest + rustls + aws-lc) for `armv7-unknown-linux-gnueabi` | links; needs only glibc symbols up to 2.12; 10 MB (4.3 MB ipk) |
 | `.ipk` packaging | produced; structure checked with `ar`/`tar` only |
 | Running on a TV | **not done** |
 
