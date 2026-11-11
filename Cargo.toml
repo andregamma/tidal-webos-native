@@ -1,16 +1,16 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/tide-core",
-    "crates/tide-gfx",
-    "crates/tide-img",
-    "crates/tide-player",
-    "crates/tide-api",
-    "crates/tide-sdl",
+    "crates/tidal-core",
+    "crates/tidal-gfx",
+    "crates/tidal-img",
+    "crates/tidal-player",
+    "crates/tidal-api",
+    "crates/tidal-sdl",
 ]
 # The sign-in relay is a Cloudflare Worker with its own (wasm) workspace: host builds here must not
 # try to compile it. See `docs/relay.md`.
-exclude = ["crates/tide-relay"]
+exclude = ["crates/tidal-relay"]
 
 [workspace.package]
 version = "0.1.0"

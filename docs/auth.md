@@ -3,7 +3,8 @@
 Sign-in uses the **PKCE authorization-code flow** of the `tidlers` crate; the **device-code flow** is the
 fallback. The relay (`docs/relay.md`) holds the handoff, and the code reaches the TV either through the
 relay's own callback or pasted by the user on the relay's page. The design (screens, state machine,
-risks) is in `docs/pkce.md`; this page is the map of the code.
+risks) lives in the code: `tidal-core/src/screens/login.rs` and `tidal-api/src/tidlers_backend/`; this
+page is the map of it.
 
 ## Why PKCE first
 
@@ -88,7 +89,7 @@ Where they live, by target:
   `KEY=value` lines, **no quotes** (make would keep them as part of the value).
 * **A bare `cargo run`/`cargo test`** does not read `.env`: export the variables in that shell
   (`set -a; . ./.env; set +a` in bash) or use `make`.
-* **Relay Worker:** `crates/tide-relay/.dev.vars` for `wrangler dev`; `wrangler secret put TIDAL_CLIENT_ID`
+* **Relay Worker:** `crates/tidal-relay/.dev.vars` for `wrangler dev`; `wrangler secret put TIDAL_CLIENT_ID`
   when deployed.
 * **On the TV:** nothing sets them yet — the app is a native binary started by webOS
   (`packaging/appinfo.json`, `main`), with no launcher script, so the PKCE flow has no client id there and
@@ -101,7 +102,7 @@ Where they live, by target:
   depend on the client id, which is why a mismatch is invisible until the refresh — so a handoff whose
   `client_id` is not this one is refused before the QR code is shown. Without the variables the crate's
   embedded PKCE client is used and a notice goes to `tide.log`.
-* **Relay** (`crates/tide-relay`): it builds the authorize URL with the same `TIDAL_CLIENT_ID` — from
+* **Relay** (`crates/tidal-relay`): it builds the authorize URL with the same `TIDAL_CLIENT_ID` — from
   `.dev.vars` locally, `wrangler secret put TIDAL_CLIENT_ID` when deployed — and never needs the secret,
   because it never calls `/token`.
 
@@ -150,11 +151,11 @@ only comes back if `TIDAL_CLIENT_ID`/`TIDAL_CLIENT_SECRET` name a client whose r
 ## Stored data
 
 Only the refresh token and the flow that produced it, in `tidlers-session.json` (mode 0600, written with
-fsync + atomic rename and read back to verify). Desktop: `$TIDE_DATA_DIR`, else `%LOCALAPPDATA%\tide-tv`
-(Windows) / `$XDG_DATA_HOME/tide-tv` / `~/.local/share/tide-tv`. TV: first writable of
-`/media/developer/tide-tv` (survives reinstalling the app), `<app dir>/tide-data`, `$HOME/tide-data`; the
+fsync + atomic rename and read back to verify). Desktop: `$TIDE_DATA_DIR`, else `%LOCALAPPDATA%\tidal-webos`
+(Windows) / `$XDG_DATA_HOME/tidal-webos` / `~/.local/share/tidal-webos`. TV: first writable of
+`/media/developer/tidal-webos` (survives reinstalling the app), `<app dir>/tide-data`, `$HOME/tide-data`; the
 session is copied to the other writable locations and re-created there on the next successful start.
-Logout deletes every copy. `tide.log` (same folder as the data dir, previous run in `tide.log.old`) lists
+Logout deletes every copy. On a real TV none of these locations has kept the file across a restart yet, so every launch signs in again (README, *Known issues*); the settings file (`tide-settings.json`) has the same problem. `tide.log` (same folder as the data dir, previous run in `tide.log.old`) lists
 which copies were found/saved and why a restore failed.
 
 The flow matters: a PKCE token must be refreshed with the PKCE client and a device-code token with the

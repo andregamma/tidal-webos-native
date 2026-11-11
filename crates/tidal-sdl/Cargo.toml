@@ -1,0 +1,18 @@
+[package]
+name = "tidal-sdl"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "tidal-webos"
+path = "src/main.rs"
+
+[dependencies]
+tidal-core = { path = "../tidal-core" }
+tidal-gfx = { path = "../tidal-gfx" }
+tidal-api = { path = "../tidal-api" }
+tidal-player = { path = "../tidal-player" }
+tidal-img = { path = "../tidal-img" }
+sdl2 = "0.36"
+glow = "0.13"
+png = "0.17"

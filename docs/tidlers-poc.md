@@ -7,9 +7,9 @@ backend and the hand-written `real` module were removed, and there is no cargo f
 Run (`TIDAL_CLIENT_ID`/`TIDAL_CLIENT_SECRET` are optional, see `docs/auth.md`):
 ```
 make sim
-# = cargo run --release -p tide-sdl   (boots, then Home or sign-in)
+# = cargo run --release -p tidal-sdl   (boots, then Home or sign-in)
 ```
-Code: `crates/tide-api/src/tidlers_backend/` (`mod.rs` adapter, `map.rs` pure mappings).
+Code: `crates/tidal-api/src/tidlers_backend/` (`mod.rs` adapter, `map.rs` pure mappings).
 
 ## What the adapter does
 | Cmd | Implementation |
@@ -56,7 +56,7 @@ gained `synced`, `Action::Toast`, and the player has an unsynced lyrics mode.
 9. **DASH manifests (HiRes)**: the crate parses the MPD with quick-xml but keeps the *raw*
    attribute values, so the URLs arrive with `&amp;` still in them and relative to `<BaseURL>`;
    `get_init_url()` also falls back to `urls[0]`, which is that `<BaseURL>` (a directory).
-   Fetching either one earns `HTTP 403`. `tide-api` unescapes the entities, joins the relative
+   Fetching either one earns `HTTP 403`. `tidal-api` unescapes the entities, joins the relative
    paths and never fetches a bare directory (`dash_url`/`dash_base` in `tidlers_backend`).
 10. **DASH means FLAC-in-fMP4**: for these tracks the service answers `audio/mp4` with
     `codecs="flac"` (init segment + `moof`/`mdat` fragments) even at `LOSSLESS`. The crate has no

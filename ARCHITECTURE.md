@@ -1,7 +1,7 @@
 # Architecture
 
 ```
-            ┌────────────────────────── tide-sdl (platform) ───────────────────────────┐
+            ┌────────────────────────── tidal-sdl (platform) ───────────────────────────┐
  remote ──► │ SDL events ─► map_key ─► Key ─┐                                          │
             │                               ▼                                          │
             │   loop:  app.update(dt, keys) ── pump Evt ◄───────────────┐              │
@@ -9,22 +9,22 @@
             │          renderer.render(&DrawList)  ─► GLES2 ─► swap     │              │
             └───────────────┬───────────────────────────────────────────┼──────────────┘
                             │                                           │ mpsc
-                  tide-core │  App ─ Sidebar/Home/Liked/Player/Login    │ Cmd ▲ ▼ Evt
+                  tidal-core │  App ─ Sidebar/Home/Liked/Player/Login    │ Cmd ▲ ▼ Evt
                   (no GL,   │  Focus · Smooth anims · DrawList          │
                    no I/O)  └───────────────────────────────────────────┼──────────────┐
-                                                                         │ tide-api    │
+                                                                         │ tidal-api    │
                                                               backend thread (tidlers)
 ```
 
 ## 1. Crates
 | crate | responsibility | knows about |
 |---|---|---|
-| `tide-core` | state, navigation/focus, layout, animation, theme; emits `DrawList` | nothing external |
-| `tide-gfx` | GLES2 renderer: SDF rounded rects, glyph atlas, scissor clips | `glow`, `fontdue` |
-| `tide-api` | backend thread implementing `Cmd → Evt` on the `tidlers` crate | `tide-core` types |
-| `tide-sdl` | window, GL context, input mapping, main loop, screenshots, theme hot-reload | SDL2 |
+| `tidal-core` | state, navigation/focus, layout, animation, theme; emits `DrawList` | nothing external |
+| `tidal-gfx` | GLES2 renderer: SDF rounded rects, glyph atlas, scissor clips | `glow`, `fontdue` |
+| `tidal-api` | backend thread implementing `Cmd → Evt` on the `tidlers` crate | `tidal-core` types |
+| `tidal-sdl` | window, GL context, input mapping, main loop, screenshots, theme hot-reload | SDL2 |
 
-Rule: dependencies point inward. The TV build swaps only `tide-sdl`'s window/input bits.
+Rule: dependencies point inward. The TV build swaps only `tidal-sdl`'s window/input bits.
 
 ## 2. Frame loop
 `update(dt, keys)` mutates state and advances animations; `view()` is a pure
@@ -59,7 +59,10 @@ because a `Resume` would reach no stream. Selecting the track that is already pl
 ## 4. Rendering
 * Logical canvas is 1920×1080; `Renderer::set_drawable_size` scales it
   (letterboxed). Rendering at 3840×2160 only changes the framebuffer and glyph
-  raster size, not the layout: `make sim-4k` lets you measure the cost.
+  raster size, not the layout: `make sim-4k` lets you measure the cost. Two things *do* adapt to it:
+above 1.5× scale the glyph atlas doubles to 2048² (glyphs are rasterised per physical px, so 4K needs ~4×
+the area), and covers are requested at their physical size (`Images::density` in `ui::cover`), with the
+texture cache trimmed to 32 entries to keep the extra memory bounded.
 * One shader, one dynamic VBO, one A8 atlas ⇒ draw calls only break at `Clip`.
   Check `--hud` for the count.
 * Text: `fontdue` rasterises per (char, physical px) into the atlas; glyphs are
@@ -73,21 +76,21 @@ Protocol (M1): `Cmd::{Boot, StartLogin, StartLoginFallback, CancelLogin, Logout,
 LoadLyrics, LoadAccount, SetLocale}`,
 `Evt::{LoginRequired, PkceLogin, FallbackOffered, LoginCancelled, LoginCode, LoggedIn{max_quality},
 LoginFailed, Home, Liked, Account, Lyrics, Error}`.
-`tide-api::tidlers_backend` adapts the `tidlers` crate (async, own tokio runtime) to this protocol.
+`tidal-api::tidlers_backend` adapts the `tidlers` crate (async, own tokio runtime) to this protocol.
 
 `services.rs` defines `Cmd` (UI → backend) and `Evt` (backend → UI). The UI
-never blocks and never sees HTTP. The only backend is `tide-api::tidlers_backend::run(BackendSide)`
+never blocks and never sees HTTP. The only backend is `tidal-api::tidlers_backend::run(BackendSide)`
 with the same contract (sign-in, token refresh/storage, home, favourites, lyrics, playback URLs);
-`tide-sdl` always starts it and there is no mock or fallback backend. See `docs/tidlers-poc.md`
+`tidal-sdl` always starts it and there is no mock or fallback backend. See `docs/tidlers-poc.md`
 for findings and status.
 
 Settings & language: the Settings page (`screens/settings.rs`, with the reusable `widgets/select.rs`) shows the
-account (`Evt::Account`: name, e-mail, plan), an **audio quality** select (`tide_core::quality::Quality`:
-Low/High/Lossless/Max, Max = HiRes) and a language select fed by `tide_core::i18n::LANGUAGES` (codes like
+account (`Evt::Account`: name, e-mail, plan), an **audio quality** select (`tidal_core::quality::Quality`:
+Low/High/Lossless/Max, Max = HiRes) and a language select fed by `tidal_core::i18n::LANGUAGES` (codes like
 `pt-BR`). Up/Down move between the two fields; OK opens a list. Picking a language sends `Cmd::SetLocale`, picking
 a quality `Cmd::SetQuality`; the backend stores both, applies them to the live client and every later one
-(`new_client`), and persists them through `tide_api::settings` (`tide-settings.json`, same multi-location storage as
-the session, kept across logout). `tide-sdl` loads them at start and gives them to `App::with_locale` /
+(`new_client`), and persists them through `tidal_api::settings` (`tide-settings.json`, same multi-location storage as
+the session, kept across logout). `tidal-sdl` loads them at start and gives them to `App::with_locale` /
 `App::with_quality`; `App::locale()` is the key for the app's own i18n texts. The quality is a *ceiling request*:
 the backend caps it by the account's `highestSoundQuality` at play time, so the default `max` means "the best this
 account can stream". `TIDAL_QUALITY` still overrides both, for debugging.
@@ -95,21 +98,22 @@ account can stream". `TIDAL_QUALITY` still overrides both, for debugging.
 Player shortcut: `Key::Quality` (keyboard `Q`, the remote's green button, scancode 487) opens Settings with the
 focus on the audio-quality field (`Action::OpenQuality`).
 
-Audio: `tide-player` (decode + PCM queue) with SDL output in `tide-sdl`; see `docs/audio.md`. The player shows one
+Audio: `tidal-player` (decode + PCM queue) with SDL output in `tidal-sdl`; see `docs/audio.md`. The player shows one
 quality badge with the stream's own specs (`FLAC · 24-bit / 96 kHz`), coloured by tier (grey/low, cyan/high,
 white/lossless, amber/max); the device format is only logged (`audio: device opened at ...`).
 
 ## 6. Roadmap
-* **M1 Auth (done, untested against the real service)**: PKCE (HiRes) whose callback comes back through
+* **M1 Auth (done; signs in against the real service, but the saved session does not survive a restart on the TV — see README, *Known issues*)**: PKCE (HiRes) whose callback comes back through
   a small Worker relay — nothing is served from the TV, so any network works — and the device-code flow as
   fallback (CD), real QR, token persistence + refresh. See `docs/auth.md` and `docs/relay.md`.
 * **M2 Data**: real Home/Liked; async image loading → textures (add an `Image`
   command + texture cache with LRU; replace `ui::art`).
-* **M3 Player (first cut done, see docs/audio.md)**: new `tide-player` crate/thread (HTTP range streamer + decoder
+* **M3 Player (first cut done, see docs/audio.md)**: new `tidal-player` crate/thread (HTTP range streamer + decoder
   + audio out). It owns the clock and sends `Evt::Position`; `PlayerScreen`
   stops simulating. Add `Cmd::Play/Pause/Seek`.
-* **M4 TV (build + ipk done, see docs/webos.md; nothing run on a TV yet)**: webOS NDK cross-build, SDL/GL context on the TV, key mapping, `.ipk`,
-  fps/memory measurements on real hardware, decide default interface resolution.
+* **M4 TV (build + ipk done and installed on a TV, see docs/webos.md; performance and most keys still unmeasured)**: webOS NDK cross-build, SDL/GL context on the TV, key mapping, `.ipk`,
+  fps/memory measurements on real hardware; `packaging/appinfo.json` declares `3840x2160`, and what that
+  costs in fill rate still has to be measured on the TV.
 
 ## 7. Testing
 * `cargo test --workspace`: navigation, text fitting, headless frame + route flow.

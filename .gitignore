@@ -1,5 +1,5 @@
 # ---- Rust / Cargo -----------------------------------------------------------
-# Build output (root workspace and excluded crates such as tide-relay).
+# Build output (root workspace and excluded crates such as tidal-relay).
 target/
 *.rs.bk
 *.profraw
@@ -16,7 +16,7 @@ target/
 *.ipk.old
 *.ipkg
 
-# ---- Cloudflare Worker relay (crates/tide-relay) ----------------------------
+# ---- Cloudflare Worker relay (crates/tidal-relay) ----------------------------
 # worker-build output, wrangler state and npm deps; local secrets never ship.
 node_modules/
 .wrangler/

@@ -1,6 +1,8 @@
 # Building and running on the TV (M4)
 
-Target tested here: LG C4 (webOS 24/26 firmware line). **Nothing in this file has been run on a TV yet.**
+Target tested here: LG C4 (webOS 24/26 firmware line). The app has since been built, installed and run on a
+real TV; the session and the settings file do not survive a restart there, and Back in the player closes the app
+(see README, *Known issues*). Everything else below is still unverified on hardware.
 What *was* verified in the build sandbox: SDL-webOS cross-compiles with the NDK, and the Rust app
 cross-compiles and links for `armv7-unknown-linux-gnueabi` (see "Build status").
 
@@ -15,16 +17,16 @@ cross-compiles and links for `armv7-unknown-linux-gnueabi` (see "Build status").
   (needed by std and `ring`): `ci/shims/getauxval.c` provides a weak fallback.
 * **Package**: `packaging/mkipk.py` writes the `.ipk` (ar of `debian-binary`, `control.tar.gz`, `data.tar.gz`;
   `usr/palm/applications/<id>/` + `usr/palm/packages/<id>/packageinfo.json`). `packaging/appinfo.json`
-  holds the app id (`dev.tidetv.app`; change it) and metadata.
+  holds the app id (`dev.tidalwebos.app`; change it) and metadata.
 
 ## Get an .ipk
 **GitHub Actions** (works from Windows): push the repo, open *Actions -> webOS build -> Run workflow*,
-download the `tide-tv-ipk` artifact. It contains the real Tidal backend (`tidlers`); the TLS/C
+download the `tidal-webos-ipk` artifact. It contains the real Tidal backend (`tidlers`); the TLS/C
 dependencies (`aws-lc`) are the risky part of the cross-build.
 **Locally** (Linux x86_64 or arm64 with cmake, ninja, python3, Rust + the `armv7-unknown-linux-gnueabi` target):
 ```
 ci/setup-ndk.sh                       # once
-ci/webos-build.sh                     # -> dist/tide-tv.ipk
+ci/webos-build.sh                     # -> dist/tidal-webos.ipk
 # without rustup's prebuilt std: BUILD_STD=1 (nightly features via RUSTC_BOOTSTRAP, needs rust-src)
 ```
 
@@ -35,8 +37,8 @@ ci/webos-build.sh                     # -> dist/tide-tv.ipk
    ```
    ares-setup-device --add tv -i "host=<TV IP>" -i "port=9922" -i "username=prisoner"
    ares-novacom --device tv --getkey        # passphrase shown in the Developer Mode app
-   ares-install --device tv dist/tide-tv.ipk
-   ares-launch  --device tv dev.tidetv.app
+   ares-install --device tv dist/tidal-webos.ipk
+   ares-launch  --device tv dev.tidalwebos.app
    ```
    (or the webOS Dev Manager / VS Code extension: same steps in a GUI.)
 
@@ -45,8 +47,8 @@ ci/webos-build.sh                     # -> dist/tide-tv.ipk
   Press every remote key and tell me which scancode shows up for OK, arrows and Back.
   Known from SDL-webOS: Back = 482, Home = 384, Exit = 505, Red = 486; Play/Stop/Prev/Next arrive as the
   standard audio keys; Rew/FF = 285/286.
-* **Log**: `/media/developer/tide-tv/tide.log` (the previous run is `tide.log.old`; falls back to `<app dir>/tide-data`, see `docs/auth.md`). Fetch with
-  `ares-pull --device tv /media/developer/tide-tv/tide.log .`. It records the SDL video/audio driver chosen,
+* **Log**: `/media/developer/tidal-webos/tide.log` (the previous run is `tide.log.old`; falls back to `<app dir>/tide-data`, see `docs/auth.md`). Fetch with
+  `ares-pull --device tv /media/developer/tidal-webos/tide.log .`. It records the SDL video/audio driver chosen,
   panics and errors.
 * **Credentials**: nothing to configure; sign-in uses the `tidlers` library's defaults (`docs/auth.md`).
 * The backend is always `tidlers`; there is no backend switch.
@@ -63,9 +65,9 @@ ci/webos-build.sh                     # -> dist/tide-tv.ipk
 | | Result |
 |---|---|
 | SDL-webOS (NDK, `WEBOS=ON`, `BROKEN_ABI=OFF`) | builds; 1.3 MB stripped; audio drivers alsa + pulseaudio, video wayland |
-| `tide-tv` (reqwest + rustls + aws-lc) for `armv7-unknown-linux-gnueabi` | links; needs only glibc symbols up to 2.12; 10 MB (4.3 MB ipk) |
+| `tidal-webos` (reqwest + rustls + aws-lc) for `armv7-unknown-linux-gnueabi` | links; needs only glibc symbols up to 2.12; 10 MB (4.3 MB ipk) |
 | `.ipk` packaging | produced; structure checked with `ar`/`tar` only |
-| Running on a TV | **not done** |
+| Running on a TV | runs; session/settings persistence and Back-in-player fail (README, *Known issues*) |
 
 Needed fixes found along the way: `getauxval` shim (glibc 2.12), and the shim must be `-fPIC` (the binary is PIE).
 GitHub Actions uses rustup's prebuilt std instead of `-Z build-std`; that path was not exercised here.

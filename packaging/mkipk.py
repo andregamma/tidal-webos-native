@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a webOS .ipk (ar archive: debian-binary, control.tar.gz, data.tar.gz) without ares-package.
 
-usage: mkipk.py --binary tide-tv --lib libSDL2-2.0.so.0 [--lib ...] --out out.ipk
+usage: mkipk.py --binary tidal-webos --lib libSDL2-2.0.so.0 [--lib ...] --out out.ipk
 Layout (learned from existing native webOS packages):
   usr/palm/applications/<id>/{appinfo.json, <main>, icon.png, largeIcon.png, lib/*}
   usr/palm/packages/<id>/packageinfo.json

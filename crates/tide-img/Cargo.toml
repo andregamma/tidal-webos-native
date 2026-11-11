@@ -1,9 +1,0 @@
-[package]
-name = "tide-img"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-ureq = "2"
-# Covers are JPEG. Pure Rust, so it cross-compiles to the TV without extra C libraries.
-image = { version = "0.25", default-features = false, features = ["jpeg"] }

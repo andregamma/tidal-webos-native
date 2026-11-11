@@ -8,13 +8,13 @@ UI ──PlayerCmd::{Pause,Resume,Seek,Stop}────────────
                        ▲ Evt::{Position,TrackEnded,PlaybackError}        │
                        └────────────────────────────────────────  PcmPort (2 s queue)
                                                                          │ fill() in the audio callback
-                                                       tide-sdl: SDL2 audio device (desktop; TV if SDL provides a driver)
+                                                       tidal-sdl: SDL2 audio device (desktop; TV if SDL provides a driver)
 ```
-* `tide-core::services`: `StreamSpec`/`StreamSource`/`PlayerCmd`, `Evt::{Position, TrackEnded, PlaybackError}`.
+* `tidal-core::services`: `StreamSpec`/`StreamSource`/`PlayerCmd`, `Evt::{Position, TrackEnded, PlaybackError}`.
   Transport goes UI → player directly, so pause/seek never wait behind backend network calls.
-* `tide-player`: `source.rs` (progressive HTTP, whole stream in RAM), `engine.rs` (symphonia
+* `tidal-player`: `source.rs` (progressive HTTP, whole stream in RAM), `engine.rs` (symphonia
   decode, seek, position, end of track), `pcm.rs` (queue + device negotiation; no audio API inside).
-* `tide-sdl/src/audio.rs`: opens/reopens an SDL device when the decoder asks for a new rate.
+* `tidal-sdl/src/audio.rs`: opens/reopens an SDL device when the decoder asks for a new rate.
 * `tidlers_backend::play`: `get_track_postpaywall_playback_info` → `Single(url)` (JSON manifest,
   LOW/HIGH/LOSSLESS) or `Segmented{init, $Number$ template}` (DASH, HIRES).
 * Quality: the user's preference (Settings → Audio quality: Low, High, Lossless, Max; stored as
@@ -34,21 +34,21 @@ streams play.
 The player shows a single badge with what is actually playing (`FLAC · 24-bit / 96 kHz`), coloured by tier the way
 the official client does: grey for Low, cyan for High, white for Lossless (kept separate from Max for now) and
 amber for Max/HiRes. The mini bar shows the same badge. The device's own format is not on screen any more; it is
-logged by `tide-sdl` (`audio: device opened at <rate> Hz, <ch> ch (asked ...)`).
+logged by `tidal-sdl` (`audio: device opened at <rate> Hz, <ch> ch (asked ...)`).
 
 ## Try it without any service
 ```
 python3 -m http.server 8099            # in a folder with a .flac/.m4a/.wav
-cargo run --release -p tide-sdl -- --play-url=http://127.0.0.1:8099/song.flac --mime=audio/flac
+cargo run --release -p tidal-sdl -- --play-url=http://127.0.0.1:8099/song.flac --mime=audio/flac
 SDL_AUDIODRIVER=<pulseaudio|alsa|...>  # override SDL's pick; the chosen driver is printed
 ```
-Playback stops when you leave the player screen (Back). There is no mini-player yet.
+Playback survives leaving the player screen (Back): the mini bar keeps it on every route (see ARCHITECTURE.md, "Mini bar").
 
 ## webOS
 * SDL audio uses whatever driver the TV's SDL build ships. **Not verified on a TV.** If it opens, the
   desktop code path is the TV code path. Run with `SDL_AUDIODRIVER` set and read the "audio: using driver" line.
 * The system-native route is the webOS media pipeline (what PlxNative uses for video via LG's
-  Starfish/`libplayerAPIs`): it decodes in the platform and bypasses `tide-player`'s decoder. It relies on
+  Starfish/`libplayerAPIs`): it decodes in the platform and bypasses `tidal-player`'s decoder. It relies on
   reverse-engineered, per-firmware private symbols, so it needs a real TV to build and test; the seam is
   `PlayerCmd`/`Evt` (implement a second player behind the same channels).
 

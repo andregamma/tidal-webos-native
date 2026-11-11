@@ -5,7 +5,7 @@ that client. A webOS TV has no public address to be one. The client `tidlers` em
 (`https://tidal.com/android/login/auth`), which the phone's browser reaches but the TV cannot read.
 
 So the app no longer listens for a callback. A small Worker at **`https://tidal-relay.andregama.dev`**
-(`crates/tide-relay`) holds one *handoff* per sign-in: it builds the sign-in page around the TV's
+(`crates/tidal-relay`) holds one *handoff* per sign-in: it builds the sign-in page around the TV's
 challenge, keeps the code for a few seconds and lets the TV pick it up over ordinary HTTPS. There are two
 ways the code gets there, and the default is the second:
 
@@ -83,10 +83,10 @@ seconds. The Worker itself keeps nothing.
 ## Deployment
 
 Nothing is deployed by the repository's build: `wrangler deploy` (or `npx wrangler@latest deploy` from
-`crates/tide-relay`) is the one explicit step. It creates the custom domain `tidal-relay.andregama.dev`
+`crates/tidal-relay`) is the one explicit step. It creates the custom domain `tidal-relay.andregama.dev`
 for the zone, the `HANDOFFS` Durable Object binding and the migration.
 
-`crates/tide-relay/wrangler.toml` holds the configuration. **All of it is optional**: the TV names its
+`crates/tidal-relay/wrangler.toml` holds the configuration. **All of it is optional**: the TV names its
 client and redirect in every handoff, and the default flow (paste) needs nothing configured. The
 variables only matter for a client whose registered redirect is this Worker's `/callback`, which is the
 variant where the code arrives by itself.
@@ -113,7 +113,7 @@ wasm-only dependency, so `cargo test --workspace` and `make check` stay host-onl
 ```
 make relay-test     # unit tests of the protocol rules (host, no wasm tooling)
 make relay-check    # cargo check --target wasm32-unknown-unknown (needs rustup target add)
-cd crates/tide-relay && npx wrangler@latest dev   # local Worker + Durable Object on :8787
+cd crates/tidal-relay && npx wrangler@latest dev   # local Worker + Durable Object on :8787
 ```
 
 With a local Worker, point the app at it: `TIDE_RELAY_BASE=http://127.0.0.1:8787 make sim`.

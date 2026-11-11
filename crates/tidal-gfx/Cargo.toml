@@ -1,0 +1,9 @@
+[package]
+name = "tidal-gfx"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tidal-core = { path = "../tidal-core" }
+glow = "0.13"
+fontdue = "0.8"

@@ -1654,7 +1654,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tide-api"
+name = "tidal-api"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
@@ -1662,13 +1662,13 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "tide-core",
+ "tidal-core",
  "tidlers",
  "tokio",
 ]
 
 [[package]]
-name = "tide-core"
+name = "tidal-core"
 version = "0.1.0"
 dependencies = [
  "qrcode",
@@ -1677,16 +1677,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "tide-gfx"
+name = "tidal-gfx"
 version = "0.1.0"
 dependencies = [
  "fontdue",
  "glow",
- "tide-core",
+ "tidal-core",
 ]
 
 [[package]]
-name = "tide-img"
+name = "tidal-img"
 version = "0.1.0"
 dependencies = [
  "image",
@@ -1694,26 +1694,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "tide-player"
+name = "tidal-player"
 version = "0.1.0"
 dependencies = [
  "symphonia",
- "tide-core",
+ "tidal-core",
  "ureq",
 ]
 
 [[package]]
-name = "tide-sdl"
+name = "tidal-sdl"
 version = "0.1.0"
 dependencies = [
  "glow",
  "png",
  "sdl2",
- "tide-api",
- "tide-core",
- "tide-gfx",
- "tide-img",
- "tide-player",
+ "tidal-api",
+ "tidal-core",
+ "tidal-gfx",
+ "tidal-img",
+ "tidal-player",
 ]
 
 [[package]]

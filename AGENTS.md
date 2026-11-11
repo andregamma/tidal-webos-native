@@ -7,7 +7,7 @@ breaking those seams.
 
 ## What this is
 
-`tide-tv` is a native (no Chromium) music client for LG webOS TVs: Rust + SDL2 +
+`tidal-webos` is a native (no Chromium) music client for LG webOS TVs: Rust + SDL2 +
 OpenGL ES 2.0, drawn directly on the GPU. It is a Cargo workspace of binaries and
 libraries; the desktop SDL build is the primary development target and the webOS
 `.ipk` is cross-built in CI.
@@ -16,13 +16,13 @@ libraries; the desktop SDL build is the primary development target and the webOS
 
 | path | contents |
 |---|---|
-| `crates/tide-core` | UI state, routes, focus, layout, animation, theme, i18n, DrawList. No GL, no I/O, no SDL. |
-| `crates/tide-gfx` | GLES2 renderer (SDF rects, glyph atlas, scissor clips). |
-| `crates/tide-img` | image decoding. |
-| `crates/tide-player` | audio decode + PCM queue. |
-| `crates/tide-api` | backend thread implementing `Cmd -> Evt` on the `tidlers` crate. |
-| `crates/tide-sdl` | window, GL context, input mapping, main loop, screenshots, theme reload — the only SDL-aware crate. |
-| `crates/tide-relay` | Cloudflare Worker PKCE relay. **Excluded from the workspace**, has its own manifest. |
+| `crates/tidal-core` | UI state, routes, focus, layout, animation, theme, i18n, DrawList. No GL, no I/O, no SDL. |
+| `crates/tidal-gfx` | GLES2 renderer (SDF rects, glyph atlas, scissor clips). |
+| `crates/tidal-img` | image decoding. |
+| `crates/tidal-player` | audio decode + PCM queue. |
+| `crates/tidal-api` | backend thread implementing `Cmd -> Evt` on the `tidlers` crate. |
+| `crates/tidal-sdl` | window, GL context, input mapping, main loop, screenshots, theme reload — the only SDL-aware crate. |
+| `crates/tidal-relay` | Cloudflare Worker PKCE relay. **Excluded from the workspace**, has its own manifest. |
 | `assets/` | theme JSON, fonts. `docs/` design notes. `ci/`, `packaging/` webOS build + ipk. |
 
 ## Commands
@@ -37,7 +37,7 @@ make relay-check  # relay type-check for wasm32-unknown-unknown
 
 * Host deps: `libsdl2-dev`, `libgles2-mesa-dev`, Rust >= 1.88.
 * Headless visual check without `make shots`:
-  `cargo run -p tide-sdl -- --screen=home --keys=down,right,ok --screenshot=out.png`
+  `cargo run -p tidal-sdl -- --screen=home --keys=down,right,ok --screenshot=out.png`
   (`--screen=` skips the boot, so the screen is the empty layout, not live content)
 * Useful flags: `--screen=`, `--keys=`, `--screenshot=`, `--size=3840x2160`,
   `--hud`, `--no-vsync`, `--play-url=` (play a URL directly).
@@ -46,11 +46,11 @@ make relay-check  # relay type-check for wasm32-unknown-unknown
 
 ## Architectural rules (do not break these)
 
-* Dependencies point inward: `tide-core` knows nothing external; only `tide-sdl`
-  knows SDL; only `tide-api` does HTTP. The TV build swaps only `tide-sdl`'s
+* Dependencies point inward: `tidal-core` knows nothing external; only `tidal-sdl`
+  knows SDL; only `tidal-api` does HTTP. The TV build swaps only `tidal-sdl`'s
   window/input bits, so platform code must not leak into other crates.
 * The UI never blocks and never sees HTTP. New backend work is a `Cmd` in
-  `tide-core/src/services.rs`; results come back as `Evt` through the mpsc pump.
+  `tidal-core/src/services.rs`; results come back as `Evt` through the mpsc pump.
 * `update(dt, keys)` mutates state; `view()` is a pure function of state that
   appends to a `DrawList`. There is no retained widget tree: screens are small
   structs that draw themselves.
@@ -68,14 +68,14 @@ make relay-check  # relay type-check for wasm32-unknown-unknown
 ## Protocol and backend changes
 
 * Changing `Cmd`/`Evt` means updating the backend
-  (`tide-api/src/tidlers_backend/`) and every `match` in `tide-sdl`/`App`.
+  (`tidal-api/src/tidlers_backend/`) and every `match` in `tidal-sdl`/`App`.
 * `tidlers` is the only backend: there is no mock mode, no `tidlers` cargo
   feature to enable and no `TIDE_BACKEND` / `--backend` switch. Keep it that way.
-* Settings (audio quality, locale) are persisted by `tide_api::settings` into
+* Settings (audio quality, locale) are persisted by `tidal_api::settings` into
   `tide-settings.json` and survive logout; quality is a ceiling request capped by
   the account's `highestSoundQuality`, and `TIDAL_QUALITY` overrides both.
 * `tidlers` is pinned (`=0.5.0`); don't bump it casually.
-* `crates/tide-relay` must stay out of the root workspace: it is a wasm/Workers
+* `crates/tidal-relay` must stay out of the root workspace: it is a wasm/Workers
   build and would break host builds.
 
 ## Configuration and secrets
@@ -90,7 +90,7 @@ make relay-check  # relay type-check for wasm32-unknown-unknown
 
 ## Testing and honesty about status
 
-* `tide-core` is GPU-free on purpose: state, navigation, text fitting and route
+* `tidal-core` is GPU-free on purpose: state, navigation, text fitting and route
   flow are unit-tested headlessly (`App::view` with `MonoMetrics`). Keep new core
   logic testable without a window.
 * Run `make check` for UI/logic changes. For renderer or visual changes, produce

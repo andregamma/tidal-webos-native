@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Cross-build tide-tv for webOS (ARMv7) and package an .ipk.
+# Cross-build tidal-webos for webOS (ARMv7) and package an .ipk.
 #
 #   WEBOS_SDK   path to arm-webos-linux-gnueabi_sdk-buildroot (default ~/webos-ndk/...; see ci/setup-ndk.sh)
-#   OUT         output .ipk (default dist/tide-tv.ipk)
+#   OUT         output .ipk (default dist/tidal-webos.ipk)
 #
 # Steps: (1) build SDL-webOS from source (bundled with the app, so the SDL ABI is ours, not the
 # firmware's), (2) cargo cross-build against it, (3) package. Nothing here was run on a TV.
@@ -42,12 +42,12 @@ export RUSTFLAGS="${RUSTFLAGS:-} -L native=$BUILD/sdl-dist/lib -C link-arg=-Wl,-
 # Prebuilt std is not available for every host: BUILD_STD=1 uses -Z build-std (needs rust-src).
 EXTRA=()
 if [ "${BUILD_STD:-0}" = 1 ]; then export RUSTC_BOOTSTRAP=1; EXTRA=(-Z build-std=std,panic_abort); fi
-cargo build --release --target "$TARGET" -p tide-sdl "${EXTRA[@]}"
-BIN=$ROOT/target/$TARGET/release/tide-tv
-"$SDK/bin/arm-webos-linux-gnueabi-strip" -o "$BUILD/tide-tv.stripped" "$BIN"
+cargo build --release --target "$TARGET" -p tidal-sdl "${EXTRA[@]}"
+BIN=$ROOT/target/$TARGET/release/tidal-webos
+"$SDK/bin/arm-webos-linux-gnueabi-strip" -o "$BUILD/tidal-webos.stripped" "$BIN"
 
 # ---- 3. Package -----------------------------------------------------------
-OUT=${OUT:-$ROOT/dist/tide-tv.ipk}
+OUT=${OUT:-$ROOT/dist/tidal-webos.ipk}
 "$SDK/bin/arm-webos-linux-gnueabi-strip" -o "$BUILD/libSDL2-2.0.so.0" "$SDL_LIB"
-python3 packaging/mkipk.py --binary "$BUILD/tide-tv.stripped" --lib "$BUILD/libSDL2-2.0.so.0" --out "$OUT" --icon "./packaging/icon.png" --large-icon "./packaging/largeIcon.png"
+python3 packaging/mkipk.py --binary "$BUILD/tidal-webos.stripped" --lib "$BUILD/libSDL2-2.0.so.0" --out "$OUT" --icon "./packaging/icon.png" --large-icon "./packaging/largeIcon.png"
 echo "done: $OUT"
